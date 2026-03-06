@@ -270,30 +270,35 @@ class CommandRouter {
     return null;
   }
 
-  /// Extract sensor name from text
+  /// Extract sensor search query from text.
+  /// Returns a search string that will be fuzzy-matched against actual page items.
   String? _extractSensorName(String text) {
-    final sensors = [
-      'CANT_RADIATION_1',
-      'CANT_TEMP_1',
-      'CANT_MFM_1',
-      'MOULD_MFM_2',
-      'SPS_MFM_3',
-    ];
+    // Remove filler words to get the meaningful search query
+    final cleaned = text
+        .replaceAll(RegExp(r'\b(open|show|go to|navigate|sensor|sensors|the|a|an|please|can you|me)\b'), '')
+        .trim();
 
-    // Check for exact name
-    for (final s in sensors) {
-      if (text.contains(s.toLowerCase())) return s;
+    // If there's something left after cleaning, use it as search
+    if (cleaned.isNotEmpty && cleaned != text) {
+      return cleaned;
     }
 
-    // Fuzzy matching
-    if (text.contains('radiation')) return 'CANT_RADIATION_1';
-    if (text.contains('temp') && text.contains('cant')) return 'CANT_TEMP_1';
-    if (text.contains('mfm') && text.contains('cant')) return 'CANT_MFM_1';
-    if (text.contains('mfm') && text.contains('mould')) return 'MOULD_MFM_2';
-    if (text.contains('mfm') && text.contains('sps')) return 'SPS_MFM_3';
+    // Check for known keywords that identify a specific sensor
+    final keywords = ['radiation', 'temp', 'temperature', 'mfm', 'cant', 'mould', 'sps'];
+    for (final k in keywords) {
+      if (text.contains(k)) {
+        // Build search string from all matching keywords
+        final parts = keywords.where((w) => text.contains(w)).toList();
+        // Add any number found
+        final numMatch = RegExp(r'(\d+)').firstMatch(text);
+        if (numMatch != null) parts.add(numMatch.group(1)!);
+        return parts.join(' ');
+      }
+    }
 
-    // If user says "radiation sensor" or "temperature sensor" (specific device)
-    if (text.contains('radiation')) return 'CANT_RADIATION_1';
+    // If user said a number (e.g. "sensor 3"), pass it
+    final numMatch = RegExp(r'(\d+)').firstMatch(text);
+    if (numMatch != null) return numMatch.group(1)!;
 
     return null;
   }
@@ -307,50 +312,34 @@ class CommandRouter {
     return null;
   }
 
-  /// Extract inverter name from text (fuzzy matching)
+  /// Extract inverter search query from text.
+  /// Returns a search string that will be fuzzy-matched against actual page items at runtime.
+  /// No hardcoded inverter names — the matching happens in the WebView JS.
   String? _extractInverterName(String text) {
-    // Known inverters (from the website audit)
-    final knownInverters = [
-      'GRP_INNVERTER_1', 'GRP_INNVERTER_2', 'GRP_INNVERTER_3',
-      'GRP_INNVERTER_4', 'GRP_INNVERTER_5', 'GRP_INNVERTER_6',
-      'GRP_INNVERTER_7', 'GRP_INNVERTER_8', 'GRP_INNVERTER_9',
-      'MOULD_INVERTER_10', 'MOULD_INVERTER_11', 'MOULD_INVERTER_12',
-      'MOULD_INVERTER_13',
-    ];
+    // Build a search string from user keywords + number
+    final parts = <String>[];
 
-    // Check for exact name match
-    for (final inv in knownInverters) {
-      if (text.contains(inv.toLowerCase())) return inv;
-    }
+    // Add prefix hint if user mentioned one
+    if (text.contains('grp')) parts.add('grp');
+    if (text.contains('mould') || text.contains('moduld') || text.contains('module')) parts.add('mould');
+    if (text.contains('cant')) parts.add('cant');
+    if (text.contains('sps')) parts.add('sps');
 
-    // Extract number from input (e.g. "inverter 4" → "4", "open inverter 10" → "10")
+    // Always include "inverter" keyword for matching
+    parts.add('inverter');
+
+    // Extract number (e.g. "inverter 4" → "4")
     final numMatch = RegExp(r'(\d+)').firstMatch(text);
     if (numMatch != null) {
-      final num = numMatch.group(1)!;
-      // Try matching with prefix hints
-      if (text.contains('mould')) {
-        final match = knownInverters.firstWhere(
-            (inv) => inv.startsWith('MOULD') && inv.endsWith('_$num'),
-            orElse: () => '');
-        if (match.isNotEmpty) return match;
-      }
-      if (text.contains('grp')) {
-        final match = knownInverters.firstWhere(
-            (inv) => inv.startsWith('GRP') && inv.endsWith('_$num'),
-            orElse: () => '');
-        if (match.isNotEmpty) return match;
-      }
-      // No prefix hint — match any inverter ending with the number
-      final match = knownInverters.firstWhere(
-          (inv) => inv.endsWith('_$num'),
-          orElse: () => '');
-      if (match.isNotEmpty) return match;
+      parts.add(numMatch.group(1)!);
     }
 
-    // Partial text matching
-    if (text.contains('grp')) return 'GRP_INNVERTER_1';
-    if (text.contains('mould')) return 'MOULD_INVERTER_10';
+    // If we have at least the word "inverter" + something else, return it
+    if (parts.length > 1) {
+      return parts.join(' ');
+    }
 
+    // If user just said "inverter" with nothing else, return null (will open list)
     return null;
   }
 

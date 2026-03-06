@@ -162,11 +162,12 @@ class ToolRegistry {
     return result;
   }
 
-  /// Navigate to sensors page, then click a sensor row by name
+  /// Navigate to sensors page, then click a sensor row by name (fuzzy)
   Future<String> _openSensorByName(String name) async {
     final nav = await _navTools.openSensors();
     await Future.delayed(const Duration(milliseconds: 2000));
-    final click = await _sensorTools.openSensor(name);
+    // Use fuzzy matching to find the best sensor match at runtime
+    final click = await _pageTools.clickBestMatch(name);
     return '$nav → $click';
   }
 
@@ -178,7 +179,7 @@ class ToolRegistry {
     return '$nav → $filter';
   }
 
-  /// Navigate to inverters page, then search & click inverter by name
+  /// Navigate to inverters page, then fuzzy-match & click inverter by name
   Future<String> _openInverterByName(String name) async {
     final nav = await _navTools.openInverters();
     // Wait for the inverter table to load
@@ -190,8 +191,8 @@ class ToolRegistry {
         break;
       }
     }
-    // Use table row click for better matching
-    final click = await _pageTools.clickTableRow(name);
+    // Use fuzzy matching to find the best inverter match at runtime
+    final click = await _pageTools.clickBestMatch(name);
     return '$nav → $click';
   }
 

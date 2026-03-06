@@ -228,4 +228,175 @@ class PageInteractionTools {
     await Future.delayed(const Duration(milliseconds: 1500));
     return result;
   }
+
+  /// Fuzzy-match user input against visible page items and click the best match.
+  /// All logic runs in JavaScript in the WebView — no API calls, no hardcoded names.
+  ///
+  /// Strategy:
+  ///  1. Normalize names: underscores → spaces, lowercase, trim
+  ///  2. Tokenize both user input and each candidate name
+  ///  3. Score by token overlap: exact(30), prefix(10), substring(5)
+  ///  4. Bonus for full-match ratio and exact string match
+  ///  5. Works with or without numbers in the name
+  Future<String> clickBestMatch(String userInput) async {
+    final safeInput = _escapeJs(userInput.toLowerCase().trim());
+    final script = '''
+      (function() {
+        var rawInput = '$safeInput';
+        var candidates = [];
+
+        // ── Collect table rows: use FIRST CELL text as the match target ──
+        var rows = document.querySelectorAll('tbody tr');
+        if (rows.length === 0) {
+          rows = document.querySelectorAll('.MuiTableRow-root');
+        }
+        for (var i = 0; i < rows.length; i++) {
+          var cells = rows[i].querySelectorAll('td');
+          var name = '';
+          if (cells.length > 0) {
+            name = cells[0].innerText.trim();
+          }
+          if (!name) {
+            name = rows[i].innerText.trim().split('\\n')[0].trim();
+          }
+          if (name.length > 0) {
+            candidates.push({ el: rows[i], name: name, index: i });
+          }
+        }
+
+        // Also check cards and list items (non-table pages)
+        if (candidates.length === 0) {
+          var cards = document.querySelectorAll('.MuiCard-root, .MuiListItem-root, .MuiListItemButton-root, [role="listitem"]');
+          for (var i = 0; i < cards.length; i++) {
+            var txt = cards[i].innerText.trim().split('\\n')[0].trim();
+            if (txt.length > 0) {
+              candidates.push({ el: cards[i], name: txt, index: i });
+            }
+          }
+        }
+
+        if (candidates.length === 0) {
+          return "No items found on the page to match against";
+        }
+
+        // ── Normalize: underscores/hyphens → spaces, lowercase, collapse spaces ──
+        function normalize(str) {
+          return str.toLowerCase().replace(/[_\\-]+/g, ' ').replace(/\\s+/g, ' ').trim();
+        }
+
+        // ── Tokenize: split into individual word tokens ──
+        function tokenize(str) {
+          return normalize(str).split(' ').filter(function(w) { return w.length > 0; });
+        }
+
+        // Only strip true command-filler words — keep ALL domain keywords
+        var fillers = ['open','show','the','a','an','go','to','me','please','can','you',
+                       'click','select','find','details','detail','of','for','check','get','what','is'];
+        var userNorm = normalize(rawInput);
+        var userTokens = tokenize(rawInput).filter(function(w) {
+          return fillers.indexOf(w) === -1;
+        });
+
+        // If all tokens got filtered out, fall back to the full normalized input
+        if (userTokens.length === 0) {
+          userTokens = tokenize(rawInput);
+        }
+
+        var bestScore = -1;
+        var bestCandidate = null;
+
+        for (var i = 0; i < candidates.length; i++) {
+          var deviceRaw = candidates[i].name;
+          var deviceNorm = normalize(deviceRaw);
+          var deviceTokens = tokenize(deviceRaw);
+          var score = 0;
+
+          // ── 1. Exact normalized string match ──
+          if (deviceNorm === userNorm) {
+            score += 1000;
+          }
+          // ── 2. One contains the other fully ──
+          else if (deviceNorm.includes(userNorm)) {
+            score += 500;
+          }
+          else if (userNorm.includes(deviceNorm)) {
+            score += 400;
+          }
+
+          // ── 3. Token-by-token matching ──
+          var matchedTokens = 0;
+          for (var j = 0; j < userTokens.length; j++) {
+            var ut = userTokens[j];
+            var tokenMatched = false;
+
+            for (var k = 0; k < deviceTokens.length; k++) {
+              var dt = deviceTokens[k];
+
+              if (ut === dt) {
+                // Exact token match
+                score += 30;
+                tokenMatched = true;
+                break;
+              } else if (dt.indexOf(ut) === 0 || ut.indexOf(dt) === 0) {
+                // One is a prefix of the other (handles typos like INNVERTER vs INVERTER)
+                score += 20;
+                tokenMatched = true;
+                break;
+              } else if (dt.includes(ut) || ut.includes(dt)) {
+                // Substring match
+                score += 10;
+                tokenMatched = true;
+                break;
+              } else if (ut.length >= 3 && dt.length >= 3) {
+                // Check if first 3 chars match (handles misspellings)
+                if (dt.substring(0, 3) === ut.substring(0, 3)) {
+                  score += 8;
+                  tokenMatched = true;
+                  break;
+                }
+              }
+            }
+
+            if (tokenMatched) {
+              matchedTokens++;
+            }
+          }
+
+          // ── 4. Bonus for match completeness ──
+          if (userTokens.length > 0) {
+            var matchRatio = matchedTokens / userTokens.length;
+            // All user tokens matched → big bonus
+            if (matchRatio === 1) {
+              score += 100;
+            } else if (matchRatio >= 0.5) {
+              score += Math.round(50 * matchRatio);
+            }
+          }
+
+          // ── 5. Prefer shorter names (more specific match) when scores are close ──
+          // Subtract a tiny penalty for longer names so "MOULD_INVERTER_4" beats
+          // "MOULD_INVERTER_4_EXTRA" if both score equally
+          score -= deviceTokens.length * 0.1;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestCandidate = candidates[i];
+          }
+        }
+
+        // If we found a reasonable match, click it
+        if (bestCandidate && bestScore > 0) {
+          bestCandidate.el.click();
+          return "Clicked: " + bestCandidate.name + " (score: " + bestScore + ")";
+        }
+
+        // List available items so user can try again
+        var available = candidates.slice(0, 15).map(function(c) { return c.name; }).join(', ');
+        return "No match found for: " + rawInput + ". Available: " + available;
+      })()
+    ''';
+    final result = await webView.executeJS(script);
+    await Future.delayed(const Duration(milliseconds: 1500));
+    return result;
+  }
 }
