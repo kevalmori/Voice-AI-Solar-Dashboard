@@ -1,0 +1,167 @@
+# Complete Website Audit + Command Router Plan
+
+## Website Function Audit
+
+Every interactive element discovered across all pages of `aalok.dyulabs.co.in`:
+
+### 1. Sidebar Navigation (all pages)
+| Action | Route |
+|--------|-------|
+| Open Dashboard | `/dashboard` |
+| Open Plants | `/plants` |
+| Open Inverters | `/inverters` |
+| Open SLMs | `/slmsDevices` |
+| Open Sensors | `/sensors` |
+| Logout | session end |
+
+### 2. Dashboard Page (`/dashboard`)
+| Element | Type | Details |
+|---------|------|---------|
+| Alerts button | Button | Top-right corner |
+| Energy tab | Tab | Switch chart to energy |
+| Revenue tab | Tab | Switch chart to revenue |
+| Monthly | Period selector | Show monthly data |
+| Yearly | Period selector | Show yearly data |
+| LifeTime | Period selector | Show lifetime data |
+| Month ← → arrows | Nav arrows | Navigate between months |
+| **Read-only data:** | | |
+| Today's Production | Stat | e.g. 1058.60 kWh |
+| Total Production | Stat | e.g. 635974.40 KWH |
+| Total Capacity | Stat | e.g. 1415.37 KWH |
+| Plant Status | Stat | Total/Active count |
+| CO2 Reduced | Stat | e.g. 131646.70 T |
+
+### 3. Plants Page (`/plants`)
+| Element | Type | Details |
+|---------|------|---------|
+| Search input | Input | placeholder: "Search Plants..." |
+| View toggle | Toggle | Chart/Table view |
+| Plant cards | Cards | Clickable, e.g. "M/S. GOA SHIPYARD LIMITED" |
+
+### 4. Plant Detail Page (`/plantsDetailsView/[id]`)
+| Element | Type | Details |
+|---------|------|---------|
+| Energy tab | Tab | Show energy chart |
+| Revenue tab | Tab | Show revenue chart |
+| Monthly | Period selector | |
+| Yearly | Period selector | |
+| LifeTime | Period selector | |
+| Month ← → arrows | Nav arrows | |
+| **Read-only data:** | | |
+| Total Energy | Stat | |
+| Today Energy | Stat | |
+| Capacity | Stat | |
+| CO2 Reduced | Stat | |
+| Today Plant Summary | Section | Temperature, etc. |
+
+### 5. Inverters Page (`/inverters`)
+| Element | Type | Details |
+|---------|------|---------|
+| Search input | Input | placeholder: "Search inverters..." |
+| Table rows | Clickable rows | 13 inverters |
+| **Columns:** Device Name, Category, Manufacturer, Total Gen, Today Gen, Created on |
+
+### 6. SLMs Page (`/slmsDevices`)
+| Element | Type | Details |
+|---------|------|---------|
+| Live Data button | Button | |
+| (Currently no devices found) | | |
+
+### 7. Sensors Page (`/sensors`)
+| Element | Type | Details |
+|---------|------|---------|
+| Search input | Input | placeholder: "Search inverters..." |
+| Tab: All | Tab | Show all sensors |
+| Tab: WMS | Tab | Filter WMS sensors |
+| Tab: MFM | Tab | Filter MFM sensors |
+| Tab: Temperature | Tab | Filter temp sensors |
+| Table rows | Clickable | 5 sensors: CANT_RADIATION_1, CANT_TEMP_1, CANT_MFM_1, MOULD_MFM_2, SPS_MFM_3 |
+
+### 8. Sensor Detail Page (`/sensors/[id]`)
+| Element | Type | Details |
+|---------|------|---------|
+| Edit icon | Button | Edit sensor name |
+| Select Option dropdown | Dropdown | Chart parameter selection |
+| Date picker | Input | Historical graph data |
+| **Read-only:** Name, Category, Live Value, Last Updated, Graph |
+
+---
+
+## Command Router Implementation
+
+### Approach
+Build a **local command router** (`CommandRouter`) that pattern-matches user input to predefined intents. Each intent maps to one or more tool calls. Gemini API is used as fallback only for unrecognized queries.
+
+### All Predefined Commands
+
+```
+NAVIGATION:
+  "open/show dashboard"        → navigate('/dashboard')
+  "open/show plants"           → navigate('/plants')
+  "open/show inverters"        → navigate('/inverters')
+  "open/show slms"             → navigate('/slmsDevices')
+  "open/show sensors"          → navigate('/sensors')
+  "go back"                    → window.history.back()
+
+PLANTS:
+  "open {name} plant"          → navigate('/plants') → click plant card
+  "search plant {query}"       → navigate('/plants') → type in search
+
+PLANT DETAIL (chained):
+  "{name} energy"              → open plant → click Energy tab
+  "{name} revenue"             → open plant → click Revenue tab
+  "{name} monthly energy"      → open plant → Energy → Monthly
+  "{name} yearly revenue"      → open plant → Revenue → Yearly
+  "{name} lifetime energy"     → open plant → Energy → LifeTime
+
+DASHBOARD TABS:
+  "show energy"                → click Energy tab
+  "show revenue"               → click Revenue tab
+  "show monthly"               → click Monthly
+  "show yearly"                → click Yearly
+  "show lifetime"              → click LifeTime
+
+SENSORS:
+  "open sensor {name}"         → navigate('/sensors') → click sensor row
+  "filter {type} sensors"      → navigate('/sensors') → click tab
+  "show wms sensors"           → navigate('/sensors') → WMS tab
+  "show temperature sensors"   → navigate('/sensors') → Temperature tab
+  "show mfm sensors"           → navigate('/sensors') → MFM tab
+
+SENSOR DETAIL:
+  "sensor value"               → read h5 value
+  "sensor name"                → read h2 name
+  "sensor category"            → read h6 category
+  "set date {DD/MM/YYYY}"      → set datepicker value
+
+INVERTERS:
+  "search inverter {query}"    → navigate('/inverters') → type in search
+  "open inverter {name}"       → navigate('/inverters') → click row
+
+GENERIC:
+  "click {text}"               → click element by text
+  "read page"                  → read page content
+  "scroll down/up"             → scroll page
+  "show alerts"                → click Alerts button
+```
+
+### Files to Change
+
+#### [NEW] [command_router.dart](file:///d:/HACKAMIND/aalok_dashboard/lib/services/command_router.dart)
+- Keyword/pattern matching engine
+- Each command has: keywords, parameter extraction regex, and an execute function
+- Returns `CommandResult` with response text and executed actions
+
+#### [MODIFY] [home_screen.dart](file:///d:/HACKAMIND/aalok_dashboard/lib/screens/home_screen.dart)
+- Try `CommandRouter.match()` first → if matched, execute locally
+- If no match → fall back to Gemini [LlmService](file:///d:/HACKAMIND/aalok_dashboard/lib/services/llm_service.dart#8-249)
+
+#### [MODIFY] [tool_registry.dart](file:///d:/HACKAMIND/aalok_dashboard/lib/tools/tool_registry.dart)
+- Add combined/chained tool methods (e.g. `openPlantByName`, `showPlantRevenue`)
+
+#### [MODIFY] [navigation_tools.dart](file:///d:/HACKAMIND/aalok_dashboard/lib/tools/navigation_tools.dart)
+- Fix SLMs route to `/slmsDevices` (currently `/slms`)
+
+## Verification
+- `flutter analyze` for static checks
+- Test on device: "open goa plant", "goa yearly revenue", "show sensors"
