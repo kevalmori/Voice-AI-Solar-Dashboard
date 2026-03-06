@@ -165,7 +165,17 @@ class ToolRegistry {
   /// Navigate to sensors page, then click a sensor row by name (fuzzy)
   Future<String> _openSensorByName(String name) async {
     final nav = await _navTools.openSensors();
-    await Future.delayed(const Duration(milliseconds: 2000));
+    // Wait for the sensor table to load (same approach as inverter)
+    for (int i = 0; i < 12; i++) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      final check = await _pageTools.readPageContent();
+      if (check.toUpperCase().contains('DEVICE NAME') ||
+          check.toUpperCase().contains('CANT') ||
+          check.toUpperCase().contains('RADIATION') ||
+          check.toUpperCase().contains('MFM')) {
+        break;
+      }
+    }
     // Use fuzzy matching to find the best sensor match at runtime
     final click = await _pageTools.clickBestMatch(name);
     return '$nav → $click';
@@ -174,8 +184,18 @@ class ToolRegistry {
   /// Navigate to sensors page, then click a filter tab
   Future<String> _filterSensorsByType(String type) async {
     final nav = await _navTools.openSensors();
-    await Future.delayed(const Duration(milliseconds: 2000));
-    final filter = await _sensorTools.filterSensors(type);
+    // Wait for the sensor page to load
+    for (int i = 0; i < 12; i++) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      final check = await _pageTools.readPageContent();
+      if (check.toUpperCase().contains('DEVICE NAME') ||
+          check.toUpperCase().contains('CANT') ||
+          check.toUpperCase().contains('MFM')) {
+        break;
+      }
+    }
+    // Use clickByText which has broader selectors than role="tab"
+    final filter = await _pageTools.clickByText(type);
     return '$nav → $filter';
   }
 

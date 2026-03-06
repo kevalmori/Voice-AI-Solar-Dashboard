@@ -19,7 +19,8 @@ class CommandRouter {
 
   /// Try to match user input to a known command. Returns null if no match.
   Future<CommandResult> processMessage(String input) async {
-    final text = input.toLowerCase().trim();
+    // Normalize: strip apostrophes so voice "can't" matches keyword "cant"
+    final text = input.toLowerCase().trim().replaceAll("'", '').replaceAll("\u2019", '');
     final tools = <ToolCallInfo>[];
 
     // ── Navigation commands ──

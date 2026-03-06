@@ -30,10 +30,24 @@ class SensorTools {
         var rawInput = '$safeName';
 
         function normalize(str) {
-          return str.toLowerCase().replace(/[_\\\\-]+/g, ' ').replace(/\\\\s+/g, ' ').trim();
+          return str.toLowerCase().replace(/['\u2019]/g, '').replace(/[_\\\\-]+/g, ' ').replace(/\\\\s+/g, ' ').trim();
         }
         function tokenize(str) {
           return normalize(str).split(' ').filter(function(w) { return w.length > 0; });
+        }
+        function editDistance(a, b) {
+          if (a.length === 0) return b.length;
+          if (b.length === 0) return a.length;
+          var matrix = [];
+          for (var i = 0; i <= b.length; i++) matrix[i] = [i];
+          for (var j = 0; j <= a.length; j++) matrix[0][j] = j;
+          for (var i = 1; i <= b.length; i++) {
+            for (var j = 1; j <= a.length; j++) {
+              if (b[i-1] === a[j-1]) matrix[i][j] = matrix[i-1][j-1];
+              else matrix[i][j] = Math.min(matrix[i-1][j-1]+1, matrix[i][j-1]+1, matrix[i-1][j]+1);
+            }
+          }
+          return matrix[b.length][a.length];
         }
 
         var fillers = ['open','show','the','a','an','go','to','me','please','can','you','click','select','find','details','detail','of','for'];
@@ -68,6 +82,11 @@ class SensorTools {
               else if (dt.indexOf(ut) === 0 || ut.indexOf(dt) === 0) { score += 20; matched++; break; }
               else if (dt.includes(ut) || ut.includes(dt)) { score += 10; matched++; break; }
               else if (ut.length >= 3 && dt.length >= 3 && dt.substring(0,3) === ut.substring(0,3)) { score += 8; matched++; break; }
+              else if (ut.length >= 3 && dt.length >= 3) {
+                var maxLen = Math.max(ut.length, dt.length);
+                var dist = editDistance(ut, dt);
+                if (dist <= Math.ceil(maxLen * 0.3)) { score += Math.round(15 * (1 - dist / maxLen)); matched++; break; }
+              }
             }
           }
 
@@ -109,15 +128,21 @@ class SensorTools {
   Future<String> filterSensors(String type) async {
     final script = '''
       (function() {
-        var tabs = document.querySelectorAll('[role="tab"]');
+        var tabs = document.querySelectorAll('[role="tab"], button.MuiTab-root, .MuiTab-root, .MuiToggleButton-root, button');
+        var matchedTabs = [];
         for (var i = 0; i < tabs.length; i++) {
-          if (tabs[i].innerText.toLowerCase().includes("${type.toLowerCase()}")) {
-            tabs[i].click();
-            return "Filtered sensors by: $type";
+          var txt = tabs[i].innerText.trim().toLowerCase();
+          if (txt.includes("${type.toLowerCase()}")) {
+            matchedTabs.push(tabs[i]);
           }
         }
-        return "Filter tab '$type' not found. Available tabs: " + 
-          Array.from(tabs).map(t => t.innerText).join(", ");
+        if (matchedTabs.length > 0) {
+          matchedTabs[0].click();
+          return "Filtered sensors by: $type";
+        }
+        var available = Array.from(tabs).map(function(t) { return t.innerText.trim(); }).filter(function(t) { return t.length > 0 && t.length < 30; });
+        var unique = available.filter(function(v, i, a) { return a.indexOf(v) === i; });
+        return "Filter tab '$type' not found. Available: " + unique.join(", ");
       })()
     ''';
     return await webView.executeJS(script);
