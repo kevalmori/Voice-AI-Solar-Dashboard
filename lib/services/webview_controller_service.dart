@@ -6,6 +6,7 @@ class WebViewControllerService {
   final Completer<void> _readyCompleter = Completer<void>();
   bool _isReady = false;
   String _currentUrl = '';
+  void Function(String url)? onUrlChanged;
 
   WebViewController? get controller => _controller;
   Future<void> get ready => _readyCompleter.future;
@@ -22,6 +23,7 @@ class WebViewControllerService {
 
   void updateCurrentUrl(String url) {
     _currentUrl = url;
+    onUrlChanged?.call(url);
   }
 
   /// Navigate to a route on the website

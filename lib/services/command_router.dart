@@ -17,311 +17,363 @@ class CommandRouter {
 
   CommandRouter(this._toolRegistry);
 
-  /// Try to match user input to a known command. Returns null if no match.
+  /// Try to match user input to a known command.
   Future<CommandResult> processMessage(String input) async {
     // Normalize: strip apostrophes so voice "can't" matches keyword "cant"
     final text = input.toLowerCase().trim().replaceAll("'", '').replaceAll("\u2019", '');
     final tools = <ToolCallInfo>[];
 
-    // ── Navigation commands ──
-    if (_matches(text, ['dashboard', 'home'])) {
-      tools.add(_tool('open_dashboard', {}));
-      await _toolRegistry.executeTool('open_dashboard', {});
-      return CommandResult(
-        response: 'Opened the dashboard.\n\nWhat would you like to do next?\n1. Show energy data\n2. Show revenue data\n3. Open plants',
-        toolCalls: _markDone(tools),
-      );
-    }
+    try {
+      // ── Navigation commands (highest priority) ──
+      if (_matches(text, ['dashboard', 'home']) && !_containsAny(text, ['energy', 'revenue', 'month', 'year'])) {
+        tools.add(_tool('open_dashboard', {}));
+        await _toolRegistry.executeTool('open_dashboard', {});
+        return CommandResult(
+          response: 'Opened the dashboard.\n\nWhat would you like to do next?\n1. Show energy data\n2. Show revenue data\n3. Open plants',
+          toolCalls: _markDone(tools),
+        );
+      }
 
-    if (_matches(text, ['plant']) && !_containsAny(text, ['sensor', 'inverter', 'dashboard'])) {
-      // Check if a specific plant name is mentioned
-      final plantName = _extractPlantName(text);
-      
-      if (plantName != null) {
-        // Check for energy/revenue request
-        if (_containsAny(text, ['energy'])) {
-          final period = _extractPeriod(text);
-          tools.add(_tool('show_plant_energy', {'name': plantName, 'period': period}));
+      // ── Plant commands ──
+      if (_matches(text, ['plant']) &&
+          !_containsAny(text, ['sensor', 'inverter', 'dashboard'])) {
+        final plantName = _extractPlantName(text);
+
+        if (plantName != null) {
+          // Energy request for a specific plant
+          if (_containsAny(text, ['energy'])) {
+            final period = _extractPeriod(text);
+            tools.add(_tool('show_plant_energy', {'name': plantName, 'period': period}));
+            await _toolRegistry.executeTool(
+                'show_plant_energy', {'name': plantName, 'period': period});
+            return CommandResult(
+              response: 'Showing ${period ?? "monthly"} energy for $plantName plant.\n\nWhat next?\n1. Show revenue instead\n2. Change period\n3. Go back to plants',
+              toolCalls: _markDone(tools),
+            );
+          }
+
+          // Revenue request for a specific plant
+          if (_containsAny(text, ['revenue', 'income', 'earning'])) {
+            final period = _extractPeriod(text);
+            tools.add(_tool('show_plant_revenue', {'name': plantName, 'period': period}));
+            await _toolRegistry.executeTool(
+                'show_plant_revenue', {'name': plantName, 'period': period});
+            return CommandResult(
+              response: 'Showing ${period ?? "monthly"} revenue for $plantName plant.\n\nWhat next?\n1. Show energy instead\n2. Change period\n3. Go back to plants',
+              toolCalls: _markDone(tools),
+            );
+          }
+
+          // Just open the plant
+          tools.add(_tool('open_plant_by_name', {'name': plantName}));
           await _toolRegistry.executeTool(
-              'show_plant_energy', {'name': plantName, 'period': period});
+              'open_plant_by_name', {'name': plantName});
           return CommandResult(
-            response: 'Showing ${period ?? "monthly"} energy for $plantName plant.\n\nWhat next?\n1. Show revenue instead\n2. Change period\n3. Go back to plants',
+            response: 'Opened $plantName plant details.\n\nWhat would you like to see?\n1. Show energy data\n2. Show revenue data\n3. Go back to plants list',
             toolCalls: _markDone(tools),
           );
         }
 
-        if (_containsAny(text, ['revenue', 'income', 'earning'])) {
-          final period = _extractPeriod(text);
-          tools.add(_tool('show_plant_revenue', {'name': plantName, 'period': period}));
+        // No specific plant → open plants list
+        tools.add(_tool('open_plants', {}));
+        await _toolRegistry.executeTool('open_plants', {});
+        return CommandResult(
+          response: 'Opened the plants page.\n\nWhat would you like to do?\n1. Open a specific plant by name\n2. Show plant energy\n3. Show plant revenue',
+          toolCalls: _markDone(tools),
+        );
+      }
+
+      // ── Sensor commands ──
+      if (_containsAny(text, ['sensor', 'sensors']) ||
+          (_containsAny(text, ['cant', 'mould', 'sps', 'radiation']) &&
+           !_containsAny(text, ['inverter', 'plant']))) {
+        final filterType = _extractSensorType(text);
+        if (filterType != null) {
+          tools.add(_tool('filter_sensors_by_type', {'type': filterType}));
           await _toolRegistry.executeTool(
-              'show_plant_revenue', {'name': plantName, 'period': period});
+              'filter_sensors_by_type', {'type': filterType});
           return CommandResult(
-            response: 'Showing ${period ?? "monthly"} revenue for $plantName plant.\n\nWhat next?\n1. Show energy instead\n2. Change period\n3. Go back to plants',
+            response: 'Showing $filterType sensors.\n\nWhat next?\n1. Open a specific sensor\n2. Show all sensors\n3. Go back to dashboard',
             toolCalls: _markDone(tools),
           );
         }
 
-        // Just open the plant
-        tools.add(_tool('open_plant_by_name', {'name': plantName}));
+        final sensorName = _extractSensorName(text);
+        if (sensorName != null) {
+          tools.add(_tool('open_sensor_by_name', {'name': sensorName}));
+          await _toolRegistry.executeTool(
+              'open_sensor_by_name', {'name': sensorName});
+          return CommandResult(
+            response: 'Opened sensor $sensorName.\n\nWhat would you like to do?\n1. Get sensor value\n2. Get sensor category\n3. Go back to sensors',
+            toolCalls: _markDone(tools),
+          );
+        }
+
+        tools.add(_tool('open_sensors', {}));
+        await _toolRegistry.executeTool('open_sensors', {});
+        return CommandResult(
+          response: 'Opened the sensors page.\n\nAvailable sensors: CANT_RADIATION_1, CANT_TEMP_1, CANT_MFM_1, MOULD_MFM_2, SPS_MFM_3\n\nWhat would you like to do?\n1. Open a specific sensor\n2. Filter by type (WMS, MFM, Temperature)\n3. Go back to dashboard',
+          toolCalls: _markDone(tools),
+        );
+      }
+
+      // ── Inverter commands ──
+      if (_containsAny(text, ['inverter'])) {
+        final inverterName = _extractInverterName(text);
+        if (inverterName != null) {
+          tools.add(_tool('open_inverter_by_name', {'name': inverterName}));
+          await _toolRegistry.executeTool(
+              'open_inverter_by_name', {'name': inverterName});
+          return CommandResult(
+            response: 'Opened inverter $inverterName.\n\nWhat next?\n1. Go back to inverters\n2. Open dashboard',
+            toolCalls: _markDone(tools),
+          );
+        }
+
+        tools.add(_tool('open_inverters', {}));
+        await _toolRegistry.executeTool('open_inverters', {});
+        return CommandResult(
+          response: 'Opened the inverters page.\n\nWhat would you like to do?\n1. Search for a specific inverter\n2. Go back to dashboard',
+          toolCalls: _markDone(tools),
+        );
+      }
+
+      // ── SLM commands ──
+      if (_containsAny(text, ['slm'])) {
+        tools.add(_tool('open_slms', {}));
+        await _toolRegistry.executeTool('open_slms', {});
+        return CommandResult(
+          response: 'Opened the SLMs page.\n\nWhat next?\n1. Open dashboard\n2. Open sensors',
+          toolCalls: _markDone(tools),
+        );
+      }
+
+      // ── Dashboard tab/period commands (energy/revenue) ──
+      // Now also matches "goa" since plant section handles goa+energy above
+      if (_containsAny(text, ['energy', 'revenue'])) {
+        final tab = _containsAny(text, ['revenue']) ? 'Revenue' : 'Energy';
+        final period = _extractPeriod(text);
+        tools.add(_tool('switch_dashboard_tab', {'tab': tab, 'period': period}));
         await _toolRegistry.executeTool(
-            'open_plant_by_name', {'name': plantName});
+            'switch_dashboard_tab', {'tab': tab, 'period': period});
+
+        // If user also specified a year (e.g. "yearly revenue for 2022"), navigate to that year
+        final year = _extractYear(text);
+        String yearResponse = '';
+        if (year != null) {
+          tools.add(_tool('change_year', {'year': year}));
+          final yearResult = await _toolRegistry.executeTool('change_year', {'year': year});
+          yearResponse = '\n$yearResult';
+        }
+
         return CommandResult(
-          response: 'Opened $plantName plant details.\n\nWhat would you like to see?\n1. Show energy data\n2. Show revenue data\n3. Go back to plants list',
+          response: 'Switched to $tab${period != null ? " ($period)" : ""} view.$yearResponse\n\nWhat next?\n1. Switch to ${tab == "Energy" ? "Revenue" : "Energy"}\n2. Change period\n3. Open plants',
           toolCalls: _markDone(tools),
         );
       }
 
-      // No specific plant → open plants list
-      tools.add(_tool('open_plants', {}));
-      await _toolRegistry.executeTool('open_plants', {});
-      return CommandResult(
-        response: 'Opened the plants page.\n\nAvailable plants: GOA (M/S. GOA SHIPYARD LIMITED)\n\nWhat would you like to do?\n1. Open GOA plant\n2. Show GOA energy\n3. Show GOA revenue',
-        toolCalls: _markDone(tools),
-      );
-    }
+      // ── Month navigation commands ──
+      if (_containsAny(text, ['month'])) {
+        if (_containsAny(text, ['next', 'forward', 'ahead'])) {
+          tools.add(_tool('click_navigation_arrow', {'direction': 'next'}));
+          await _toolRegistry.executeTool('click_navigation_arrow', {'direction': 'next'});
+          return CommandResult(
+            response: 'Moved to the next month.\n\nWhat next?\n1. Next month\n2. Previous month\n3. Show energy',
+            toolCalls: _markDone(tools),
+          );
+        }
 
-    // ── Sensor commands ──
-    // Also trigger on sensor identifier keywords (e.g. "open cant temp 1" without saying "sensor")
-    if (_containsAny(text, ['sensor', 'sensors']) ||
-        (_containsAny(text, ['cant', 'mould', 'sps', 'radiation']) &&
-         !_containsAny(text, ['inverter', 'plant']))) {
-      // Filter by type FIRST (WMS, MFM, Temperature, All)
-      final filterType = _extractSensorType(text);
-      if (filterType != null) {
-        tools.add(_tool('filter_sensors_by_type', {'type': filterType}));
-        await _toolRegistry.executeTool(
-            'filter_sensors_by_type', {'type': filterType});
+        if (_containsAny(text, ['previous', 'prev', 'last', 'back', 'before'])) {
+          tools.add(_tool('click_navigation_arrow', {'direction': 'prev'}));
+          await _toolRegistry.executeTool('click_navigation_arrow', {'direction': 'prev'});
+          return CommandResult(
+            response: 'Moved to the previous month.\n\nWhat next?\n1. Previous month\n2. Next month\n3. Show energy',
+            toolCalls: _markDone(tools),
+          );
+        }
+
+        final month = _extractMonth(text);
+        if (month != null) {
+          tools.add(_tool('change_month', {'month': month}));
+          await _toolRegistry.executeTool('change_month', {'month': month});
+          return CommandResult(
+            response: 'Changed to $month.\n\nWhat next?\n1. Next month\n2. Previous month\n3. Show energy',
+            toolCalls: _markDone(tools),
+          );
+        }
+      }
+
+      // ── Specific month without "month" keyword (e.g. "change to april", "for january") ──
+      final monthDirect = _extractMonth(text);
+      if (monthDirect != null && _containsAny(text, ['change', 'go to', 'select', 'switch', 'set', 'for'])) {
+        tools.add(_tool('change_month', {'month': monthDirect}));
+        await _toolRegistry.executeTool('change_month', {'month': monthDirect});
         return CommandResult(
-          response: 'Showing $filterType sensors.\n\nWhat next?\n1. Open a specific sensor\n2. Show all sensors\n3. Go back to dashboard',
+          response: 'Changed to $monthDirect.\n\nWhat next?\n1. Next month\n2. Previous month\n3. Show energy',
           toolCalls: _markDone(tools),
         );
       }
 
-      // Check for specific sensor name
-      final sensorName = _extractSensorName(text);
-      if (sensorName != null) {
-        tools.add(_tool('open_sensor_by_name', {'name': sensorName}));
-        await _toolRegistry.executeTool(
-            'open_sensor_by_name', {'name': sensorName});
+      // ── Year navigation (e.g. "year 2022", "change year to 2023") ──
+      final year = _extractYear(text);
+      if (year != null && _containsAny(text, ['year', 'change', 'go to', 'select', 'switch', 'set', 'for'])) {
+        tools.add(_tool('change_year', {'year': year}));
+        await _toolRegistry.executeTool('change_year', {'year': year});
         return CommandResult(
-          response: 'Opened sensor $sensorName.\n\nWhat would you like to do?\n1. Get sensor value\n2. Get sensor category\n3. Go back to sensors',
+          response: 'Changed to year $year.\n\nWhat next?\n1. Show energy\n2. Show revenue\n3. Open plants',
           toolCalls: _markDone(tools),
         );
       }
 
-      // Just open sensors list
-      tools.add(_tool('open_sensors', {}));
-      await _toolRegistry.executeTool('open_sensors', {});
-      return CommandResult(
-        response: 'Opened the sensors page.\n\nAvailable sensors: CANT_RADIATION_1, CANT_TEMP_1, CANT_MFM_1, MOULD_MFM_2, SPS_MFM_3\n\nWhat would you like to do?\n1. Open a specific sensor\n2. Filter by type (WMS, MFM, Temperature)\n3. Go back to dashboard',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── Inverter commands ──
-    if (_containsAny(text, ['inverter'])) {
-      final inverterName = _extractInverterName(text);
-      if (inverterName != null) {
-        tools.add(_tool('open_inverter_by_name', {'name': inverterName}));
-        await _toolRegistry.executeTool(
-            'open_inverter_by_name', {'name': inverterName});
+      // ── Sensor detail commands (only when on sensor page, more specific matching) ──
+      if (_containsAny(text, ['value', 'reading']) &&
+          !_containsAny(text, ['energy', 'revenue', 'month', 'year', 'plant', 'sensor list'])) {
+        tools.add(_tool('get_sensor_value', {}));
+        final value = await _toolRegistry.executeTool('get_sensor_value', {});
         return CommandResult(
-          response: 'Opened inverter $inverterName.\n\nWhat next?\n1. Go back to inverters\n2. Open dashboard',
+          response: 'Current sensor value: $value\n\nWhat next?\n1. Get sensor name\n2. Change date\n3. Go back',
           toolCalls: _markDone(tools),
         );
       }
 
-      tools.add(_tool('open_inverters', {}));
-      await _toolRegistry.executeTool('open_inverters', {});
-      return CommandResult(
-        response: 'Opened the inverters page.\n\nWhat would you like to do?\n1. Search for a specific inverter\n2. Go back to dashboard',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── SLM commands ──
-    if (_containsAny(text, ['slm'])) {
-      tools.add(_tool('open_slms', {}));
-      await _toolRegistry.executeTool('open_slms', {});
-      return CommandResult(
-        response: 'Opened the SLMs page.\n\nWhat next?\n1. Open dashboard\n2. Open sensors',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── Dashboard tab/period commands ──
-    if (_containsAny(text, ['energy', 'revenue']) && !_containsAny(text, ['plant', 'goa'])) {
-      final tab = _containsAny(text, ['revenue']) ? 'Revenue' : 'Energy';
-      final period = _extractPeriod(text);
-      tools.add(_tool('switch_dashboard_tab', {'tab': tab, 'period': period}));
-      await _toolRegistry.executeTool(
-          'switch_dashboard_tab', {'tab': tab, 'period': period});
-      return CommandResult(
-        response: 'Switched to $tab${period != null ? " ($period)" : ""} view.\n\nWhat next?\n1. Switch to ${tab == "Energy" ? "Revenue" : "Energy"}\n2. Change period\n3. Open plants',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── Sensor detail commands (when already on sensor page) ──
-    if (_containsAny(text, ['value', 'reading', 'current'])) {
-      tools.add(_tool('get_sensor_value', {}));
-      final value = await _toolRegistry.executeTool('get_sensor_value', {});
-      return CommandResult(
-        response: 'Current sensor value: $value\n\nWhat next?\n1. Get sensor name\n2. Change date\n3. Go back',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── Go back ──
-    if (_containsAny(text, ['back', 'previous', 'return'])) {
-      tools.add(_tool('go_back', {}));
-      await _toolRegistry.executeTool('go_back', {});
-      return CommandResult(
-        response: 'Went back to the previous page.',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── Read page ──
-    if (_containsAny(text, ['read', 'what is', 'what\'s on', 'show me', 'content'])) {
-      tools.add(_tool('read_page_content', {}));
-      final content = await _toolRegistry.executeTool('read_page_content', {});
-      return CommandResult(
-        response: 'Page content:\n$content',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── Scroll ──
-    if (_containsAny(text, ['scroll'])) {
-      final direction = _containsAny(text, ['up']) ? 'up' : 'down';
-      tools.add(_tool('scroll_page', {'direction': direction}));
-      await _toolRegistry.executeTool(
-          'scroll_page', {'direction': direction});
-      return CommandResult(
-        response: 'Scrolled $direction.',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── Alert commands ──
-    if (_containsAny(text, ['alert', 'notification'])) {
-      tools.add(_tool('click_by_text', {'text': 'Alerts'}));
-      await _toolRegistry.executeTool(
-          'click_by_text', {'text': 'Alerts'});
-      return CommandResult(
-        response: 'Opened alerts.',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── Period-only commands (Monthly/Yearly/LifeTime) ──
-    final periodOnly = _extractPeriod(text);
-    if (periodOnly != null && text.split(' ').length <= 3) {
-      tools.add(_tool('click_by_text', {'text': periodOnly}));
-      await _toolRegistry.executeTool(
-          'click_by_text', {'text': periodOnly});
-      return CommandResult(
-        response: 'Selected $periodOnly view.',
-        toolCalls: _markDone(tools),
-      );
-    }
-
-    // ── Generic click (last resort for simple commands) ──
-    if (_containsAny(text, ['click', 'tap', 'press', 'open', 'show'])) {
-      // Try to extract what to click from the text
-      final clickTarget = text
-          .replaceAll(RegExp(r'\b(click|tap|press|open|show|on|the|please|can you|me)\b'), '')
-          .trim();
-      if (clickTarget.isNotEmpty) {
-        tools.add(_tool('click_by_text', {'text': clickTarget}));
-        final result = await _toolRegistry.executeTool(
-            'click_by_text', {'text': clickTarget});
+      // ── Go back ──
+      if (_containsAny(text, ['back', 'previous', 'return'])) {
+        tools.add(_tool('go_back', {}));
+        await _toolRegistry.executeTool('go_back', {});
         return CommandResult(
-          response: result,
+          response: 'Went back to the previous page.',
           toolCalls: _markDone(tools),
         );
       }
-    }
 
-    // ── No match — provide helpful fallback message ──
-    return CommandResult(
-      matched: true,
-      response: 'Sorry, I didn\'t understand that command.\n\n'
-          'Here are some things you can try:\n'
-          '1. Open GOA plant\n'
-          '2. Show sensors\n'
-          '3. Show inverters\n'
-          '4. Open dashboard',
-    );
+      // ── Scroll ──
+      if (_containsAny(text, ['scroll'])) {
+        final direction = _containsAny(text, ['up']) ? 'up' : 'down';
+        tools.add(_tool('scroll_page', {'direction': direction}));
+        await _toolRegistry.executeTool('scroll_page', {'direction': direction});
+        return CommandResult(
+          response: 'Scrolled $direction.',
+          toolCalls: _markDone(tools),
+        );
+      }
+
+      // ── Alert commands ──
+      if (_containsAny(text, ['alert', 'notification'])) {
+        tools.add(_tool('click_by_text', {'text': 'Alerts'}));
+        await _toolRegistry.executeTool('click_by_text', {'text': 'Alerts'});
+        return CommandResult(
+          response: 'Opened alerts.',
+          toolCalls: _markDone(tools),
+        );
+      }
+
+      // ── Period-only commands (Monthly/Yearly/LifeTime) ──
+      final periodOnly = _extractPeriod(text);
+      if (periodOnly != null && text.split(' ').length <= 3) {
+        tools.add(_tool('click_by_text', {'text': periodOnly}));
+        await _toolRegistry.executeTool('click_by_text', {'text': periodOnly});
+        return CommandResult(
+          response: 'Selected $periodOnly view.',
+          toolCalls: _markDone(tools),
+        );
+      }
+
+      // ── Read page (only if clearly asking to read, not combined with action keywords) ──
+      if (_containsAny(text, ['read page', 'whats on the page', 'page content', 'read content']) &&
+          !_containsAny(text, ['energy', 'revenue', 'plant', 'sensor', 'inverter', 'month', 'year'])) {
+        tools.add(_tool('read_page_content', {}));
+        await _toolRegistry.executeTool('read_page_content', {});
+        return CommandResult(
+          response: 'I\'ve read the current page for you.',
+          toolCalls: _markDone(tools),
+        );
+      }
+
+      // ── No match — provide helpful fallback ──
+      return CommandResult(
+        matched: true,
+        response: 'Sorry, I didn\'t understand that command.\n\n'
+            'Here are some things you can try:\n'
+            '1. Open GOA plant\n'
+            '2. Show sensors\n'
+            '3. Show energy / revenue\n'
+            '4. Change month to April\n'
+            '5. Yearly revenue for 2022',
+      );
+
+    } catch (e) {
+      // ── Global error handler — never show raw errors ──
+      return CommandResult(
+        matched: true,
+        response: 'Sorry, something went wrong while processing your command. Please try again.\n\n'
+            'You can try:\n'
+            '1. Open dashboard\n'
+            '2. Show sensors\n'
+            '3. Open GOA plant',
+      );
+    }
   }
 
   // ════════════════════════════════
   // Helper methods
   // ════════════════════════════════
 
-  /// Check if text matches any of the given keywords
   bool _matches(String text, List<String> keywords) {
     return keywords.any((k) => text.contains(k));
   }
 
-  /// Check if text contains any of the given words
   bool _containsAny(String text, List<String> words) {
     return words.any((w) => text.contains(w));
   }
 
-  /// Extract plant name from text
   String? _extractPlantName(String text) {
-    // Known plants
-    if (text.contains('goa') || text.contains('shipyard')) return 'GOA';
-    // Add more plants here as they become available
+    // Strip command keywords to extract just the plant name fragment
+    final fillers = [
+      'open', 'show', 'go', 'to', 'navigate', 'the', 'a', 'an',
+      'plant', 'plants', 'please', 'can', 'you', 'me', 'display',
+      'energy', 'revenue', 'income', 'earning', 'earnings',
+      'monthly', 'yearly', 'lifetime', 'month', 'year',
+      'for', 'of', 'from', 'in', 'on', 'at', 'with',
+      'details', 'detail', 'data', 'info', 'information',
+      'check', 'get', 'find', 'select', 'switch', 'change',
+    ];
+    final words = text.split(RegExp(r'\s+'));
+    final remaining = words
+        .where((w) => w.isNotEmpty && !fillers.contains(w))
+        .join(' ')
+        .trim();
+    if (remaining.isNotEmpty) return remaining;
     return null;
   }
 
-  /// Extract sensor search query from text.
-  /// Returns a search string that will be fuzzy-matched against actual page items.
   String? _extractSensorName(String text) {
-    // Remove filler words to get the meaningful search query
     final cleaned = text
         .replaceAll(RegExp(r'\b(open|show|go to|navigate|sensor|sensors|the|a|an|please|can you|me)\b'), '')
         .trim();
 
-    // If there's something left after cleaning, use it as search
     if (cleaned.isNotEmpty && cleaned != text) {
       return cleaned;
     }
 
-    // Check for known keywords that identify a specific sensor
     final keywords = ['radiation', 'temp', 'temperature', 'mfm', 'cant', 'mould', 'sps'];
     for (final k in keywords) {
       if (text.contains(k)) {
-        // Build search string from all matching keywords
         final parts = keywords.where((w) => text.contains(w)).toList();
-        // Add any number found
         final numMatch = RegExp(r'(\d+)').firstMatch(text);
         if (numMatch != null) parts.add(numMatch.group(1)!);
         return parts.join(' ');
       }
     }
 
-    // If user said a number (e.g. "sensor 3"), pass it
     final numMatch = RegExp(r'(\d+)').firstMatch(text);
     if (numMatch != null) return numMatch.group(1)!;
 
     return null;
   }
 
-  /// Extract sensor filter type from text.
-  /// Returns null if the text contains specific sensor identifiers or numbers,
-  /// because that means the user is referring to a specific sensor (e.g. "cant temp 1")
-  /// rather than a category (e.g. "show WMS sensors").
   String? _extractSensorType(String text) {
-    // If specific sensor identifiers are present, user means a specific sensor, not a category
     if (['cant', 'mould', 'sps'].any((id) => text.contains(id))) return null;
-
-    // If a number is present (e.g. "mfm 1"), it's a specific sensor, not a category
     if (RegExp(r'\d').hasMatch(text)) return null;
-
     if (text.contains('wms')) return 'WMS';
     if (text.contains('mfm')) return 'MFM';
     if (text.contains('temperature') || text.contains('temp')) return 'Temperature';
@@ -329,35 +381,53 @@ class CommandRouter {
     return null;
   }
 
-  /// Extract inverter search query from text.
-  /// Returns a search string that will be fuzzy-matched against actual page items at runtime.
-  /// No hardcoded inverter names — the matching happens in the WebView JS.
   String? _extractInverterName(String text) {
-    // Build a search string from user keywords + number
-    final parts = <String>[];
-
-    // Add prefix hint if user mentioned one
-    if (text.contains('grp')) parts.add('grp');
-    if (text.contains('mould') || text.contains('moduld') || text.contains('module')) parts.add('mould');
-    if (text.contains('cant')) parts.add('cant');
-    if (text.contains('sps')) parts.add('sps');
-
-    // Always include "inverter" keyword for matching
-    parts.add('inverter');
-
-    // Extract number (e.g. "inverter 4" → "4")
-    final numMatch = RegExp(r'(\d+)').firstMatch(text);
-    if (numMatch != null) {
-      parts.add(numMatch.group(1)!);
-    }
-
-    // If we have at least the word "inverter" + something else, return it
-    if (parts.length > 1) {
-      return parts.join(' ');
-    }
-
-    // If user just said "inverter" with nothing else, return null (will open list)
+    // Strip command keywords to extract just the inverter name fragment
+    final fillers = [
+      'open', 'show', 'go', 'to', 'navigate', 'the', 'a', 'an',
+      'please', 'can', 'you', 'me', 'display',
+      'for', 'of', 'from', 'in', 'on', 'at', 'with',
+      'details', 'detail', 'data', 'info', 'information',
+      'check', 'get', 'find', 'select', 'switch', 'change',
+    ];
+    final words = text.split(RegExp(r'\s+'));
+    final remaining = words
+        .where((w) => w.isNotEmpty && !fillers.contains(w))
+        .join(' ')
+        .trim();
+    if (remaining.isNotEmpty) return remaining;
     return null;
+  }
+
+  /// Extract month name from text
+  String? _extractMonth(String text) {
+    final months = {
+      'january': 'January', 'jan': 'Jan',
+      'february': 'February', 'feb': 'Feb',
+      'march': 'March', 'mar': 'Mar',
+      'april': 'April', 'apr': 'Apr',
+      'may': 'May',
+      'june': 'June', 'jun': 'Jun',
+      'july': 'July', 'jul': 'Jul',
+      'august': 'August', 'aug': 'Aug',
+      'september': 'September', 'sep': 'Sep', 'sept': 'Sep',
+      'october': 'October', 'oct': 'Oct',
+      'november': 'November', 'nov': 'Nov',
+      'december': 'December', 'dec': 'Dec',
+    };
+    // Check full names first (longer match takes priority)
+    for (final entry in months.entries) {
+      if (text.contains(entry.key)) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
+
+  /// Extract a 4-digit year from text (e.g. "2022", "2023")
+  String? _extractYear(String text) {
+    final match = RegExp(r'\b(20\d{2})\b').firstMatch(text);
+    return match?.group(1);
   }
 
   /// Extract period (Monthly/Yearly/LifeTime) from text
@@ -368,18 +438,19 @@ class CommandRouter {
     if (text.contains('yearly') || text.contains('year') || text.contains('annual')) {
       return 'Yearly';
     }
-    if (text.contains('monthly') || text.contains('month')) {
+    if (text.contains('monthly')) {
+      return 'Monthly';
+    }
+    if (text.contains('month') && _extractMonth(text) == null) {
       return 'Monthly';
     }
     return null;
   }
 
-  /// Create a ToolCallInfo in executing state
   ToolCallInfo _tool(String name, Map<String, dynamic> args) {
     return ToolCallInfo(name: name, arguments: args, isExecuting: true);
   }
 
-  /// Mark all tools as done
   List<ToolCallInfo> _markDone(List<ToolCallInfo> tools) {
     return tools
         .map((t) => t.copyWith(isExecuting: false, result: 'done'))

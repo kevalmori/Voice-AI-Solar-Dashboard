@@ -90,23 +90,22 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      Future.delayed(const Duration(milliseconds: 100), () {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
-      });
-    }
+      }
+    });
   }
 
   @override
   void didUpdateWidget(ChatPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.messages.length != oldWidget.messages.length) {
-      _scrollToBottom();
-    }
+    // Always scroll to bottom when parent rebuilds (message added or updated)
+    _scrollToBottom();
   }
 
   @override
@@ -375,12 +374,15 @@ class _ChatPanelState extends State<ChatPanel> {
                                     : const Color(0xFF4ADE80),
                               ),
                               const SizedBox(width: 4),
-                              Text(
-                                tc.displayName,
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.6),
-                                  fontSize: 11,
-                                  fontFamily: 'monospace',
+                              Flexible(
+                                child: Text(
+                                  tc.displayName,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.6),
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ],

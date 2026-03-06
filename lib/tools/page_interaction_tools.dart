@@ -321,6 +321,19 @@ class PageInteractionTools {
         var bestScore = -1;
         var bestCandidate = null;
 
+        // ── Character-level longest common substring ──
+        function longestCommonSubstring(a, b) {
+          var maxLen = 0;
+          for (var i = 0; i < a.length; i++) {
+            for (var j = 0; j < b.length; j++) {
+              var len = 0;
+              while (i + len < a.length && j + len < b.length && a[i+len] === b[j+len]) len++;
+              if (len > maxLen) maxLen = len;
+            }
+          }
+          return maxLen;
+        }
+
         for (var i = 0; i < candidates.length; i++) {
           var deviceRaw = candidates[i].name;
           var deviceNorm = normalize(deviceRaw);
@@ -329,18 +342,27 @@ class PageInteractionTools {
 
           // ── 1. Exact normalized string match ──
           if (deviceNorm === userNorm) {
-            score += 1000;
+            score += 2000;
           }
           // ── 2. One contains the other fully ──
           else if (deviceNorm.includes(userNorm)) {
-            score += 500;
+            score += 800;
+            // Bonus for tighter match (penalize extra chars in device name)
+            var tightness = userNorm.length / deviceNorm.length;
+            score += Math.round(200 * tightness);
           }
           else if (userNorm.includes(deviceNorm)) {
-            score += 400;
+            score += 600;
           }
 
-          // ── 3. Token-by-token matching ──
+          // ── 3. Character-level overlap (STRICT — dominates scoring) ──
+          var lcs = longestCommonSubstring(userNorm, deviceNorm);
+          // Quadratic bonus: more matching chars → disproportionately higher
+          score += lcs * lcs * 2;
+
+          // ── 4. Token-by-token matching ──
           var matchedTokens = 0;
+          var matchedDeviceTokens = 0;
           for (var j = 0; j < userTokens.length; j++) {
             var ut = userTokens[j];
             var tokenMatched = false;
@@ -349,33 +371,37 @@ class PageInteractionTools {
               var dt = deviceTokens[k];
 
               if (ut === dt) {
-                // Exact token match
-                score += 30;
+                // Exact token match — high weight
+                score += 50;
                 tokenMatched = true;
+                matchedDeviceTokens++;
                 break;
               } else if (dt.indexOf(ut) === 0 || ut.indexOf(dt) === 0) {
-                // One is a prefix of the other (handles typos like INNVERTER vs INVERTER)
-                score += 20;
+                // Prefix match
+                var overlap = Math.min(ut.length, dt.length);
+                score += 15 + overlap * 3;
                 tokenMatched = true;
+                matchedDeviceTokens++;
                 break;
               } else if (dt.includes(ut) || ut.includes(dt)) {
                 // Substring match
                 score += 10;
                 tokenMatched = true;
+                matchedDeviceTokens++;
                 break;
               } else if (ut.length >= 3 && dt.length >= 3) {
-                // Check if first 3 chars match (handles misspellings)
                 if (dt.substring(0, 3) === ut.substring(0, 3)) {
                   score += 8;
                   tokenMatched = true;
+                  matchedDeviceTokens++;
                   break;
                 }
-                // Edit distance for near-matches (e.g. can't→cant, invertor→inverter)
                 var maxLen = Math.max(ut.length, dt.length);
                 var dist = editDistance(ut, dt);
                 if (dist <= Math.ceil(maxLen * 0.3)) {
                   score += Math.round(15 * (1 - dist / maxLen));
                   tokenMatched = true;
+                  matchedDeviceTokens++;
                   break;
                 }
               }
@@ -386,21 +412,23 @@ class PageInteractionTools {
             }
           }
 
-          // ── 4. Bonus for match completeness ──
+          // ── 5. Bonus for match completeness ──
           if (userTokens.length > 0) {
             var matchRatio = matchedTokens / userTokens.length;
-            // All user tokens matched → big bonus
             if (matchRatio === 1) {
-              score += 100;
+              score += 150;
             } else if (matchRatio >= 0.5) {
-              score += Math.round(50 * matchRatio);
+              score += Math.round(60 * matchRatio);
             }
           }
 
-          // ── 5. Prefer shorter names (more specific match) when scores are close ──
-          // Subtract a tiny penalty for longer names so "MOULD_INVERTER_4" beats
-          // "MOULD_INVERTER_4_EXTRA" if both score equally
-          score -= deviceTokens.length * 0.1;
+          // ── 6. Penalty for unmatched device tokens (prefer tighter fits) ──
+          var unmatchedDevice = deviceTokens.length - matchedDeviceTokens;
+          score -= unmatchedDevice * 15;
+
+          // ── 7. Length similarity bonus (prefer names closest in length) ──
+          var lenRatio = Math.min(userNorm.length, deviceNorm.length) / Math.max(userNorm.length, deviceNorm.length);
+          score += Math.round(50 * lenRatio);
 
           if (score > bestScore) {
             bestScore = score;
@@ -422,5 +450,274 @@ class PageInteractionTools {
     final result = await webView.executeJS(script);
     await Future.delayed(const Duration(milliseconds: 1500));
     return result;
+  }
+
+  /// Change the displayed month by clicking the specific navigation arrows
+  /// next to the month label on the dashboard. The dashboard shows full month
+  /// names (e.g. "March") in a <p> tag flanked by two MuiIconButton-root arrows.
+  Future<String> changeMonth(String targetMonth) async {
+    final safeMonth = _escapeJs(targetMonth);
+
+    // Step 1: Ensure "Monthly" view is selected (month arrows only appear in Monthly view)
+    await clickByText('Monthly');
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Step 2: Read the current month from the page and calculate direction
+    final planScript = '''
+      (function() {
+        var fullMonths = ['January','February','March','April','May','June',
+                          'July','August','September','October','November','December'];
+        var shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+        // Find target index (match both short and full names)
+        var targetIdx = -1;
+        var targetLower = '$safeMonth'.toLowerCase();
+        for (var i = 0; i < fullMonths.length; i++) {
+          if (fullMonths[i].toLowerCase() === targetLower ||
+              shortMonths[i].toLowerCase() === targetLower) {
+            targetIdx = i;
+            break;
+          }
+        }
+        if (targetIdx === -1) return JSON.stringify({error: 'Unknown month: $safeMonth'});
+
+        // Find the month label: look for a <p> or <span> that contains exactly a month name
+        var currentIdx = -1;
+        var labels = document.querySelectorAll('p, span, h6');
+        for (var i = 0; i < labels.length; i++) {
+          var txt = labels[i].innerText.trim();
+          for (var m = 0; m < fullMonths.length; m++) {
+            if (txt === fullMonths[m] || txt === shortMonths[m]) {
+              currentIdx = m;
+              break;
+            }
+          }
+          if (currentIdx >= 0) break;
+        }
+        if (currentIdx === -1) return JSON.stringify({error: 'Could not detect current month on page'});
+        if (currentIdx === targetIdx) return JSON.stringify({error: 'Already on ' + fullMonths[targetIdx]});
+
+        // Calculate shortest direction
+        var forwardSteps = (targetIdx - currentIdx + 12) % 12;
+        var backwardSteps = (currentIdx - targetIdx + 12) % 12;
+        var direction = forwardSteps <= backwardSteps ? 'next' : 'prev';
+        var steps = Math.min(forwardSteps, backwardSteps);
+
+        return JSON.stringify({
+          current: fullMonths[currentIdx],
+          target: fullMonths[targetIdx],
+          direction: direction,
+          steps: steps
+        });
+      })()
+    ''';
+    final planResult = await webView.executeJS(planScript);
+
+    // Parse result
+    final cleaned = planResult.replaceAll(RegExp(r'^"|"$'), '').replaceAll(r'\"', '"');
+
+    if (cleaned.contains('"error"')) {
+      final errorMatch = RegExp(r'"error"\s*:\s*"([^"]+)"').firstMatch(cleaned);
+      return errorMatch?.group(1) ?? 'Error detecting month';
+    }
+
+    final dirMatch = RegExp(r'"direction"\s*:\s*"(\w+)"').firstMatch(cleaned);
+    final stepsMatch = RegExp(r'"steps"\s*:\s*(\d+)').firstMatch(cleaned);
+    final targetMatch = RegExp(r'"target"\s*:\s*"(\w+)"').firstMatch(cleaned);
+
+    if (dirMatch == null || stepsMatch == null) {
+      return 'Could not determine navigation direction';
+    }
+
+    final direction = dirMatch.group(1)!;
+    final steps = int.parse(stepsMatch.group(1)!);
+    final target = targetMatch?.group(1) ?? targetMonth;
+
+    // Step 3: Click the specific month arrow buttons N times
+    // The arrows are MuiIconButton-root siblings of the month <p> label
+    for (int i = 0; i < steps; i++) {
+      final clickScript = '''
+        (function() {
+          var fullMonths = ['January','February','March','April','May','June',
+                            'July','August','September','October','November','December'];
+          var shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+          // Find the month label element
+          var monthLabel = null;
+          var labels = document.querySelectorAll('p, span, h6');
+          for (var i = 0; i < labels.length; i++) {
+            var txt = labels[i].innerText.trim();
+            for (var m = 0; m < fullMonths.length; m++) {
+              if (txt === fullMonths[m] || txt === shortMonths[m]) {
+                monthLabel = labels[i];
+                break;
+              }
+            }
+            if (monthLabel) break;
+          }
+          if (!monthLabel) return 'Month label not found';
+
+          // Find arrow buttons near the month label (siblings in the parent container)
+          var parent = monthLabel.parentElement;
+          if (!parent) return 'Parent container not found';
+
+          var buttons = parent.querySelectorAll('button, .MuiIconButton-root');
+          if (buttons.length < 2) {
+            // Try grandparent
+            parent = parent.parentElement;
+            if (parent) buttons = parent.querySelectorAll('button, .MuiIconButton-root');
+          }
+
+          if (buttons.length >= 2) {
+            // First button = prev (left arrow), last button = next (right arrow)
+            var btn = '${direction == 'next' ? 'true' : 'false'}' === 'true'
+                      ? buttons[buttons.length - 1]
+                      : buttons[0];
+            btn.click();
+            return 'Clicked $direction arrow';
+          }
+
+          return 'Navigation arrows not found near month label';
+        })()
+      ''';
+      await webView.executeJS(clickScript);
+      await Future.delayed(const Duration(milliseconds: 800));
+    }
+
+    return 'Changed to $target';
+  }
+
+  /// Change the displayed year by clicking the specific navigation arrows
+  /// next to the year label on the dashboard. The dashboard shows the year (e.g. "2026")
+  /// in a <p> tag flanked by two MuiIconButton-root arrows (only in Yearly view).
+  Future<String> changeYear(String targetYear) async {
+    final safeYear = _escapeJs(targetYear);
+    final targetYearInt = int.tryParse(targetYear);
+    if (targetYearInt == null) return 'Invalid year: $targetYear';
+
+    // Step 1: Wait a moment for any previous UI actions to settle
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Step 2: Read the current year from the page and calculate steps
+    final planScript = '''
+      (function() {
+        var target = parseInt('$safeYear');
+        if (isNaN(target)) return JSON.stringify({error: 'Invalid year: $safeYear'});
+
+        // Find the year label: look for a <p> or <span> that contains exactly a 4-digit year
+        var currentYear = -1;
+        var labels = document.querySelectorAll('p, span, h6');
+        for (var i = 0; i < labels.length; i++) {
+          var txt = labels[i].innerText.trim();
+          var yearMatch = txt.match(/^(20\\d{2})\$/);
+          if (yearMatch) {
+            currentYear = parseInt(yearMatch[1]);
+            break;
+          }
+        }
+        if (currentYear === -1) return JSON.stringify({error: 'Could not detect current year on page'});
+        if (currentYear === target) return JSON.stringify({error: 'Already on year ' + target});
+
+        var steps = Math.abs(target - currentYear);
+        var direction = target > currentYear ? 'next' : 'prev';
+
+        return JSON.stringify({
+          current: currentYear,
+          target: target,
+          direction: direction,
+          steps: steps
+        });
+      })()
+    ''';
+    final planResult = await webView.executeJS(planScript);
+
+    final cleaned = planResult.replaceAll(RegExp(r'^"|"$'), '').replaceAll(r'\"', '"');
+
+    if (cleaned.contains('"error"')) {
+      final errorMatch = RegExp(r'"error"\s*:\s*"([^"]+)"').firstMatch(cleaned);
+      return errorMatch?.group(1) ?? 'Sorry, could not navigate to year.';
+    }
+
+    final dirMatch = RegExp(r'"direction"\s*:\s*"(\w+)"').firstMatch(cleaned);
+    final stepsMatch = RegExp(r'"steps"\s*:\s*(\d+)').firstMatch(cleaned);
+
+    if (dirMatch == null || stepsMatch == null) {
+      return 'Sorry, could not determine which direction to navigate.';
+    }
+
+    final direction = dirMatch.group(1)!;
+    final steps = int.parse(stepsMatch.group(1)!);
+
+    // Step 3: Click the year arrow buttons N times, verifying each click
+    for (int i = 0; i < steps; i++) {
+      // Read the year BEFORE clicking so we can verify it changed
+      final readYearScript = '''
+        (function() {
+          var labels = document.querySelectorAll('p, span, h6');
+          for (var i = 0; i < labels.length; i++) {
+            var txt = labels[i].innerText.trim();
+            if (txt.match(/^20\\d{2}\$/)) return txt;
+          }
+          return '';
+        })()
+      ''';
+      final yearBefore = await webView.executeJS(readYearScript);
+
+      // Click the arrow
+      final clickScript = '''
+        (function() {
+          var yearLabel = null;
+          var labels = document.querySelectorAll('p, span, h6');
+          for (var i = 0; i < labels.length; i++) {
+            var txt = labels[i].innerText.trim();
+            if (txt.match(/^20\\d{2}\$/)) {
+              yearLabel = labels[i];
+              break;
+            }
+          }
+          if (!yearLabel) return 'Year label not found';
+
+          var parent = yearLabel.parentElement;
+          if (!parent) return 'Parent container not found';
+
+          var buttons = parent.querySelectorAll('button, .MuiIconButton-root');
+          if (buttons.length < 2) {
+            parent = parent.parentElement;
+            if (parent) buttons = parent.querySelectorAll('button, .MuiIconButton-root');
+          }
+
+          if (buttons.length >= 2) {
+            var btn = '${direction == 'next' ? 'true' : 'false'}' === 'true'
+                      ? buttons[buttons.length - 1]
+                      : buttons[0];
+            btn.click();
+            return 'Clicked $direction arrow';
+          }
+
+          return 'Navigation arrows not found near year label';
+        })()
+      ''';
+      await webView.executeJS(clickScript);
+
+      // Verify the year actually changed (poll up to 2 seconds)
+      bool changed = false;
+      for (int retry = 0; retry < 8; retry++) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        final yearAfter = await webView.executeJS(readYearScript);
+        if (yearAfter != yearBefore && yearAfter.isNotEmpty) {
+          changed = true;
+          break;
+        }
+      }
+
+      // If the year didn't change, wait a bit longer and try clicking again
+      if (!changed) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        await webView.executeJS(clickScript);
+        await Future.delayed(const Duration(milliseconds: 1000));
+      }
+    }
+
+    return 'Changed to year $targetYear';
   }
 }

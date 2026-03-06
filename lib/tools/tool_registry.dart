@@ -104,6 +104,10 @@ class ToolRegistry {
         return await _pageTools.clickTableRow(args['text'] ?? '');
       case 'click_navigation_arrow':
         return await _pageTools.clickNavigationArrow(args['direction'] ?? 'next');
+      case 'change_month':
+        return await _pageTools.changeMonth(args['month'] ?? '');
+      case 'change_year':
+        return await _pageTools.changeYear(args['year'] ?? '');
 
       // Legacy tools (kept for backward compat)
       case 'open_plant':
@@ -129,19 +133,21 @@ class ToolRegistry {
     for (int i = 0; i < 16; i++) {
       await Future.delayed(const Duration(milliseconds: 500));
       final check = await _pageTools.readPageContent();
-      if (check.toUpperCase().contains('KWH') ||
-          check.toUpperCase().contains('GOA') ||
-          check.toUpperCase().contains('SHIPYARD')) {
+      final upper = check.toUpperCase();
+      if (upper.contains('KWH') ||
+          upper.contains('KWP') ||
+          upper.contains('ACTIVE') ||
+          upper.contains('PLANT')) {
         return;
       }
     }
   }
 
-  /// Navigate to plants page, then click a plant card by name
+  /// Navigate to plants page, then fuzzy-match & click plant by name
   Future<String> _openPlantByName(String name) async {
     final nav = await _navTools.openPlants();
     await _waitForPlantCards();
-    final click = await _plantTools.openPlant(name);
+    final click = await _pageTools.clickBestMatch(name);
     return '$nav → $click';
   }
 
@@ -150,7 +156,7 @@ class ToolRegistry {
       String name, String tab, String? period) async {
     final nav = await _navTools.openPlants();
     await _waitForPlantCards();
-    final click = await _plantTools.openPlant(name);
+    final click = await _pageTools.clickBestMatch(name);
     await Future.delayed(const Duration(milliseconds: 3000));
     final tabResult = await _pageTools.clickByText(tab);
     String result = '$nav → $click → $tabResult';
