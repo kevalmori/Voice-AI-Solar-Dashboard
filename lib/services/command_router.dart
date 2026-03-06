@@ -6,9 +6,15 @@ import '../services/web_data_discovery.dart';
 class CommandResult {
   final String response;
   final List<ToolCallInfo> toolCalls;
+  final List<String> suggestions;
   final bool matched;
 
-  CommandResult({required this.response, this.toolCalls = const [], this.matched = true});
+  CommandResult({
+    required this.response,
+    this.toolCalls = const [],
+    this.suggestions = const [],
+    this.matched = true,
+  });
 }
 
 /// Locally matches user input to tool functions using keyword/pattern matching.
@@ -19,6 +25,9 @@ class CommandResult {
 class CommandRouter {
   final ToolRegistry _toolRegistry;
   final WebDataDiscovery _discovery;
+
+  /// Fixed sensor filter types
+  static const List<String> sensorTypes = ['All', 'WMS', 'MFM', 'Temperature'];
 
   CommandRouter(this._toolRegistry, this._discovery);
 
@@ -34,8 +43,9 @@ class CommandRouter {
         tools.add(_tool('open_dashboard', {}));
         await _toolRegistry.executeTool('open_dashboard', {});
         return CommandResult(
-          response: 'Opened the dashboard.\n\nWhat would you like to do next?\n1. Show energy data\n2. Show revenue data\n3. Open plants',
+          response: 'Opened the dashboard.',
           toolCalls: _markDone(tools),
+          suggestions: ['Show energy', 'Show revenue', 'Open plants', 'Open sensors'],
         );
       }
 
@@ -52,8 +62,9 @@ class CommandRouter {
             await _toolRegistry.executeTool(
                 'show_plant_energy', {'name': plantName, 'period': period});
             return CommandResult(
-              response: 'Showing ${period ?? "monthly"} energy for $plantName plant.\n\nWhat next?\n1. Show revenue instead\n2. Change period\n3. Go back to plants',
+              response: 'Showing ${period ?? "monthly"} energy for $plantName plant.',
               toolCalls: _markDone(tools),
+              suggestions: ['Show revenue', 'Yearly', 'Monthly', 'Go back'],
             );
           }
 
@@ -64,8 +75,9 @@ class CommandRouter {
             await _toolRegistry.executeTool(
                 'show_plant_revenue', {'name': plantName, 'period': period});
             return CommandResult(
-              response: 'Showing ${period ?? "monthly"} revenue for $plantName plant.\n\nWhat next?\n1. Show energy instead\n2. Change period\n3. Go back to plants',
+              response: 'Showing ${period ?? "monthly"} revenue for $plantName plant.',
               toolCalls: _markDone(tools),
+              suggestions: ['Show energy', 'Yearly', 'Monthly', 'Go back'],
             );
           }
 
@@ -74,23 +86,39 @@ class CommandRouter {
           await _toolRegistry.executeTool(
               'open_plant_by_name', {'name': plantName});
           return CommandResult(
-            response: 'Opened $plantName plant details.\n\nWhat would you like to see?\n1. Show energy data\n2. Show revenue data\n3. Go back to plants list',
+            response: 'Opened $plantName plant details.',
             toolCalls: _markDone(tools),
+            suggestions: ['Show energy data', 'Show revenue data', 'Go back'],
           );
         }
 
         // No specific plant → open plants list
         tools.add(_tool('open_plants', {}));
         await _toolRegistry.executeTool('open_plants', {});
-        final plantSuggestions = _discovery.getPlantSuggestions();
         return CommandResult(
-          response: 'Opened the plants page.\n\nKnown plants: $plantSuggestions\n\nWhat would you like to do?\n1. Open a specific plant by name\n2. Show plant energy\n3. Show plant revenue',
+          response: 'Opened the plants page.',
           toolCalls: _markDone(tools),
+          suggestions: _plantListSuggestions(),
+        );
+      }
+
+      // ── Sensor type filter commands (e.g. "open temperature sensor", "show wms sensors") ──
+      // Must be checked BEFORE generic sensor commands
+      final sensorTypeMatch = _matchSensorTypeFromText(text);
+      if (sensorTypeMatch != null &&
+          _containsAny(text, ['sensor', 'sensors', 'filter', 'type', 'show', 'open',
+            'temperature', 'temp', 'wms', 'mfm'])) {
+        tools.add(_tool('filter_sensors_by_type', {'type': sensorTypeMatch}));
+        await _toolRegistry.executeTool(
+            'filter_sensors_by_type', {'type': sensorTypeMatch});
+        return CommandResult(
+          response: 'Showing $sensorTypeMatch sensors.',
+          toolCalls: _markDone(tools),
+          suggestions: _sensorFilteredSuggestions(sensorTypeMatch),
         );
       }
 
       // ── Sensor commands ──
-      // Dynamically check if any sensor keyword appears in the text
       if (_containsAny(text, ['sensor', 'sensors']) ||
           (_discovery.textContainsSensorKeyword(text) &&
            !_containsAny(text, ['inverter', 'plant']))) {
@@ -101,8 +129,9 @@ class CommandRouter {
           await _toolRegistry.executeTool(
               'filter_sensors_by_type', {'type': filterType});
           return CommandResult(
-            response: 'Showing $filterType sensors.\n\nWhat next?\n1. Open a specific sensor\n2. Show all sensors\n3. Go back to dashboard',
+            response: 'Showing $filterType sensors.',
             toolCalls: _markDone(tools),
+            suggestions: _sensorFilteredSuggestions(filterType),
           );
         }
 
@@ -112,18 +141,18 @@ class CommandRouter {
           await _toolRegistry.executeTool(
               'open_sensor_by_name', {'name': sensorName});
           return CommandResult(
-            response: 'Opened sensor $sensorName.\n\nWhat would you like to do?\n1. Get sensor value\n2. Get sensor category\n3. Go back to sensors',
+            response: 'Opened sensor $sensorName.',
             toolCalls: _markDone(tools),
+            suggestions: ['Get sensor value', 'Go back', 'Open dashboard'],
           );
         }
 
         tools.add(_tool('open_sensors', {}));
         await _toolRegistry.executeTool('open_sensors', {});
-        final sensorSuggestions = _discovery.getSensorSuggestions();
-        final typeSuggestions = _discovery.getSensorTypeSuggestions();
         return CommandResult(
-          response: 'Opened the sensors page.\n\nAvailable sensors: $sensorSuggestions\n\nWhat would you like to do?\n1. Open a specific sensor\n2. Filter by type ($typeSuggestions)\n3. Go back to dashboard',
+          response: 'Opened the sensors page.',
           toolCalls: _markDone(tools),
+          suggestions: _sensorListSuggestions(),
         );
       }
 
@@ -135,17 +164,18 @@ class CommandRouter {
           await _toolRegistry.executeTool(
               'open_inverter_by_name', {'name': inverterName});
           return CommandResult(
-            response: 'Opened inverter $inverterName.\n\nWhat next?\n1. Go back to inverters\n2. Open dashboard',
+            response: 'Opened inverter $inverterName.',
             toolCalls: _markDone(tools),
+            suggestions: ['Go back', 'Open dashboard', 'Open sensors'],
           );
         }
 
         tools.add(_tool('open_inverters', {}));
         await _toolRegistry.executeTool('open_inverters', {});
-        final inverterSuggestions = _discovery.getInverterSuggestions();
         return CommandResult(
-          response: 'Opened the inverters page.\n\nKnown inverters: $inverterSuggestions\n\nWhat would you like to do?\n1. Search for a specific inverter\n2. Go back to dashboard',
+          response: 'Opened the inverters page.',
           toolCalls: _markDone(tools),
+          suggestions: _inverterListSuggestions(),
         );
       }
 
@@ -154,14 +184,16 @@ class CommandRouter {
         tools.add(_tool('open_slms', {}));
         await _toolRegistry.executeTool('open_slms', {});
         return CommandResult(
-          response: 'Opened the SLMs page.\n\nWhat next?\n1. Open dashboard\n2. Open sensors',
+          response: 'Opened the SLMs page.',
           toolCalls: _markDone(tools),
+          suggestions: ['Open dashboard', 'Open sensors', 'Open plants'],
         );
       }
 
       // ── Dashboard tab/period commands (energy/revenue) ──
       if (_containsAny(text, ['energy', 'revenue'])) {
         final tab = _containsAny(text, ['revenue']) ? 'Revenue' : 'Energy';
+        final otherTab = tab == 'Energy' ? 'Revenue' : 'Energy';
         final period = _extractPeriod(text);
         tools.add(_tool('switch_dashboard_tab', {'tab': tab, 'period': period}));
         await _toolRegistry.executeTool(
@@ -173,12 +205,13 @@ class CommandRouter {
         if (year != null) {
           tools.add(_tool('change_year', {'year': year}));
           final yearResult = await _toolRegistry.executeTool('change_year', {'year': year});
-          yearResponse = '\n$yearResult';
+          yearResponse = ' $yearResult';
         }
 
         return CommandResult(
-          response: 'Switched to $tab${period != null ? " ($period)" : ""} view.$yearResponse\n\nWhat next?\n1. Switch to ${tab == "Energy" ? "Revenue" : "Energy"}\n2. Change period\n3. Open plants',
+          response: 'Switched to $tab${period != null ? " ($period)" : ""} view.$yearResponse',
           toolCalls: _markDone(tools),
+          suggestions: ['Show $otherTab', 'Yearly', 'Monthly', 'Open plants'],
         );
       }
 
@@ -188,8 +221,9 @@ class CommandRouter {
           tools.add(_tool('click_navigation_arrow', {'direction': 'next'}));
           await _toolRegistry.executeTool('click_navigation_arrow', {'direction': 'next'});
           return CommandResult(
-            response: 'Moved to the next month.\n\nWhat next?\n1. Next month\n2. Previous month\n3. Show energy',
+            response: 'Moved to the next month.',
             toolCalls: _markDone(tools),
+            suggestions: ['Next month', 'Previous month', 'Show energy', 'Show revenue'],
           );
         }
 
@@ -197,8 +231,9 @@ class CommandRouter {
           tools.add(_tool('click_navigation_arrow', {'direction': 'prev'}));
           await _toolRegistry.executeTool('click_navigation_arrow', {'direction': 'prev'});
           return CommandResult(
-            response: 'Moved to the previous month.\n\nWhat next?\n1. Previous month\n2. Next month\n3. Show energy',
+            response: 'Moved to the previous month.',
             toolCalls: _markDone(tools),
+            suggestions: ['Previous month', 'Next month', 'Show energy', 'Show revenue'],
           );
         }
 
@@ -207,8 +242,9 @@ class CommandRouter {
           tools.add(_tool('change_month', {'month': month}));
           await _toolRegistry.executeTool('change_month', {'month': month});
           return CommandResult(
-            response: 'Changed to $month.\n\nWhat next?\n1. Next month\n2. Previous month\n3. Show energy',
+            response: 'Changed to $month.',
             toolCalls: _markDone(tools),
+            suggestions: ['Next month', 'Previous month', 'Show energy', 'Show revenue'],
           );
         }
       }
@@ -219,8 +255,9 @@ class CommandRouter {
         tools.add(_tool('change_month', {'month': monthDirect}));
         await _toolRegistry.executeTool('change_month', {'month': monthDirect});
         return CommandResult(
-          response: 'Changed to $monthDirect.\n\nWhat next?\n1. Next month\n2. Previous month\n3. Show energy',
+          response: 'Changed to $monthDirect.',
           toolCalls: _markDone(tools),
+          suggestions: ['Next month', 'Previous month', 'Show energy', 'Show revenue'],
         );
       }
 
@@ -230,19 +267,21 @@ class CommandRouter {
         tools.add(_tool('change_year', {'year': year}));
         await _toolRegistry.executeTool('change_year', {'year': year});
         return CommandResult(
-          response: 'Changed to year $year.\n\nWhat next?\n1. Show energy\n2. Show revenue\n3. Open plants',
+          response: 'Changed to year $year.',
           toolCalls: _markDone(tools),
+          suggestions: ['Show energy', 'Show revenue', 'Open plants'],
         );
       }
 
-      // ── Sensor detail commands (only when on sensor page, more specific matching) ──
+      // ── Sensor detail commands (only when on sensor page) ──
       if (_containsAny(text, ['value', 'reading']) &&
           !_containsAny(text, ['energy', 'revenue', 'month', 'year', 'plant', 'sensor list'])) {
         tools.add(_tool('get_sensor_value', {}));
         final value = await _toolRegistry.executeTool('get_sensor_value', {});
         return CommandResult(
-          response: 'Current sensor value: $value\n\nWhat next?\n1. Get sensor name\n2. Change date\n3. Go back',
+          response: 'Current sensor value: $value',
           toolCalls: _markDone(tools),
+          suggestions: ['Go back', 'Open sensors', 'Open dashboard'],
         );
       }
 
@@ -253,17 +292,20 @@ class CommandRouter {
         return CommandResult(
           response: 'Went back to the previous page.',
           toolCalls: _markDone(tools),
+          suggestions: ['Open dashboard', 'Open plants', 'Show sensors'],
         );
       }
 
       // ── Scroll ──
       if (_containsAny(text, ['scroll'])) {
         final direction = _containsAny(text, ['up']) ? 'up' : 'down';
+        final otherDir = direction == 'up' ? 'down' : 'up';
         tools.add(_tool('scroll_page', {'direction': direction}));
         await _toolRegistry.executeTool('scroll_page', {'direction': direction});
         return CommandResult(
           response: 'Scrolled $direction.',
           toolCalls: _markDone(tools),
+          suggestions: ['Scroll $otherDir', 'Go back', 'Open dashboard'],
         );
       }
 
@@ -274,6 +316,7 @@ class CommandRouter {
         return CommandResult(
           response: 'Opened alerts.',
           toolCalls: _markDone(tools),
+          suggestions: ['Open dashboard', 'Go back'],
         );
       }
 
@@ -285,10 +328,11 @@ class CommandRouter {
         return CommandResult(
           response: 'Selected $periodOnly view.',
           toolCalls: _markDone(tools),
+          suggestions: ['Show energy', 'Show revenue', 'Open plants'],
         );
       }
 
-      // ── Read page (only if clearly asking to read, not combined with action keywords) ──
+      // ── Read page ──
       if (_containsAny(text, ['read page', 'whats on the page', 'page content', 'read content']) &&
           !_containsAny(text, ['energy', 'revenue', 'plant', 'sensor', 'inverter', 'month', 'year'])) {
         tools.add(_tool('read_page_content', {}));
@@ -296,33 +340,105 @@ class CommandRouter {
         return CommandResult(
           response: 'I\'ve read the current page for you.',
           toolCalls: _markDone(tools),
+          suggestions: ['Open dashboard', 'Open plants', 'Show sensors'],
         );
       }
 
-      // ── No match — provide helpful fallback with dynamic suggestions ──
-      final plantHint = _discovery.getPlantSuggestions(max: 2);
+      // ── No match ──
       return CommandResult(
-        matched: true,
-        response: 'Sorry, I didn\'t understand that command.\n\n'
-            'Here are some things you can try:\n'
-            '1. Open a plant (e.g. $plantHint)\n'
-            '2. Show sensors\n'
-            '3. Show energy / revenue\n'
-            '4. Change month to April\n'
-            '5. Yearly revenue for 2022',
+        response: 'Sorry, I didn\'t understand that command. Try tapping a suggestion below or say something like "open plants" or "show sensors".',
+        suggestions: _defaultSuggestions(),
       );
 
     } catch (e) {
-      // ── Global error handler — never show raw errors ──
       return CommandResult(
-        matched: true,
-        response: 'Sorry, something went wrong while processing your command. Please try again.\n\n'
-            'You can try:\n'
-            '1. Open dashboard\n'
-            '2. Show sensors\n'
-            '3. Open plants',
+        response: 'Sorry, something went wrong. Please try again.',
+        suggestions: _defaultSuggestions(),
       );
     }
+  }
+
+  // ════════════════════════════════════
+  // Dynamic suggestion builders
+  // ════════════════════════════════════
+
+  /// Default suggestions for fallback/error
+  List<String> _defaultSuggestions() {
+    return ['Open dashboard', 'Open plants', 'Show sensors', 'Show inverters'];
+  }
+
+  /// Suggestions after opening the plants list
+  List<String> _plantListSuggestions() {
+    final plants = _discovery.getPlantSuggestions(max: 2);
+    if (plants.contains('(run')) {
+      // Discovery hasn't run yet — show generic
+      return ['Open dashboard', 'Show sensors', 'Show inverters'];
+    }
+    // Show discovered plant names as actionable commands
+    final names = plants.split(', ').take(2).toList();
+    final suggestions = <String>[];
+    for (final name in names) {
+      if (name.isNotEmpty && !name.startsWith('(') && name.length < 25) {
+        suggestions.add('Open $name plant');
+      }
+    }
+    suggestions.add('Open dashboard');
+    return suggestions.take(4).toList();
+  }
+
+  /// Suggestions after opening the sensors list
+  List<String> _sensorListSuggestions() {
+    return ['Filter WMS', 'Filter MFM', 'Filter Temperature', 'Open dashboard'];
+  }
+
+  /// Suggestions after filtering sensors by type
+  List<String> _sensorFilteredSuggestions(String currentType) {
+    final suggestions = <String>[];
+    // Suggest other filter types
+    for (final type in sensorTypes) {
+      if (type.toLowerCase() != currentType.toLowerCase() && type != 'All') {
+        suggestions.add('Filter $type');
+      }
+    }
+    suggestions.add('Show all sensors');
+    suggestions.add('Go back');
+    return suggestions.take(4).toList();
+  }
+
+  /// Suggestions after opening the inverters list
+  List<String> _inverterListSuggestions() {
+    final inverters = _discovery.getInverterSuggestions(max: 2);
+    if (inverters.contains('(run')) {
+      return ['Open dashboard', 'Show sensors', 'Open plants'];
+    }
+    final names = inverters.split(', ').take(2).toList();
+    final suggestions = <String>[];
+    for (final name in names) {
+      if (name.isNotEmpty && !name.startsWith('(') && name.length < 25) {
+        suggestions.add('Open inverter $name');
+      }
+    }
+    suggestions.add('Open dashboard');
+    return suggestions.take(4).toList();
+  }
+
+  // ════════════════════════════════════
+  // Sensor type matching
+  // ════════════════════════════════════
+
+  /// Match sensor type keywords from user text
+  /// Handles: "temperature sensor", "wms sensors", "mfm sensor", "all sensors"
+  String? _matchSensorTypeFromText(String text) {
+    if (text.contains('temperature') || text.contains('temp')) return 'Temperature';
+    if (text.contains('wms')) return 'WMS';
+    if (text.contains('mfm')) return 'MFM';
+    // "all sensors" — only if it's clearly about showing all
+    if (RegExp(r'\ball\b').hasMatch(text) &&
+        _containsAny(text, ['sensor', 'sensors']) &&
+        !text.contains('install')) {
+      return 'All';
+    }
+    return null;
   }
 
   // ════════════════════════════════════
@@ -339,9 +455,7 @@ class CommandRouter {
 
   /// Check if the text contains a specific item identifier (number or known name fragment)
   bool _hasSpecificItemIdentifier(String text) {
-    // If there's a number, it's likely a specific item (e.g. "sensor 1")
     if (RegExp(r'\d').hasMatch(text)) return true;
-    // If the text is long enough beyond the command words, it likely has a name
     final stripped = text
         .replaceAll(RegExp(r'\b(show|open|filter|sensors?|by|type|the|all|a|an)\b'), '')
         .trim();
@@ -349,7 +463,6 @@ class CommandRouter {
   }
 
   /// Extract an entity name from text by removing filler/command words.
-  /// [entityKeywords] are additional domain words to strip (e.g. ['plant', 'plants']).
   String? _extractEntityName(String text, List<String> entityKeywords) {
     final fillers = [
       'open', 'show', 'go', 'to', 'navigate', 'the', 'a', 'an',
@@ -386,7 +499,6 @@ class CommandRouter {
       'november': 'November', 'nov': 'Nov',
       'december': 'December', 'dec': 'Dec',
     };
-    // Check full names first (longer match takes priority)
     for (final entry in months.entries) {
       if (text.contains(entry.key)) {
         return entry.value;
@@ -395,7 +507,7 @@ class CommandRouter {
     return null;
   }
 
-  /// Extract a 4-digit year from text (e.g. "2022", "2023")
+  /// Extract a 4-digit year from text
   String? _extractYear(String text) {
     final match = RegExp(r'\b(20\d{2})\b').firstMatch(text);
     return match?.group(1);

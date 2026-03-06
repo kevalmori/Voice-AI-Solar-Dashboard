@@ -141,10 +141,11 @@ class _HomeScreenState extends State<HomeScreen> {
           toolCalls: result.toolCalls.isNotEmpty ? result.toolCalls : null,
         );
         _isProcessing = false;
-        _suggestions = _parseSuggestions(result.response);
-        if (_suggestions.isEmpty) {
-          _suggestions = _getContextualSuggestions();
-        }
+        // Use structured suggestions from CommandResult;
+        // fall back to contextual suggestions if empty
+        _suggestions = result.suggestions.isNotEmpty
+            ? result.suggestions
+            : _getContextualSuggestions();
       });
     } catch (e) {
       setState(() {
@@ -153,75 +154,47 @@ class _HomeScreenState extends State<HomeScreen> {
           content: 'Sorry, an error occurred: $e',
         );
         _isProcessing = false;
+        _suggestions = _getContextualSuggestions();
       });
     }
   }
 
-  /// Parse numbered suggestions from response text
-  List<String> _parseSuggestions(String response) {
-    final suggestions = <String>[];
-    final lines = response.split('\n');
-    for (final line in lines) {
-      final trimmed = line.trim();
-      if (RegExp(r'^\d+\.\s').hasMatch(trimmed)) {
-        final suggestion =
-            trimmed.replaceFirst(RegExp(r'^\d+\.\s'), '').trim();
-        if (suggestion.isNotEmpty && suggestion.length < 40) {
-          suggestions.add(suggestion);
-        }
-      }
-    }
-    return suggestions.take(4).toList();
-  }
-
+  /// Build contextual suggestions based on the current page
   List<String> _getContextualSuggestions() {
-    final url = _webViewService.currentUrl;
+    final url = _webViewService.currentUrl.toLowerCase();
+
+    // Sensor detail page (specific sensor)
     if (url.contains('/sensors/')) {
-      return [
-        'Get sensor value',
-        'Get sensor category',
-        'Go back',
-        'Open dashboard',
-      ];
-    } else if (url.contains('/sensors')) {
-      // Use dynamically discovered sensor types
-      final types = _discovery.getSensorTypeSuggestions();
-      return [
-        'Open a sensor',
-        'Filter by type ($types)',
-        'Go back',
-        'Open dashboard',
-      ];
-    } else if (url.contains('/plants') && url.contains('Details')) {
-      return [
-        'Show energy data',
-        'Show revenue data',
-        'Yearly revenue',
-        'Go back',
-      ];
-    } else if (url.contains('/plants')) {
-      // Use dynamically discovered plant names
-      final plantHint = _discovery.getPlantSuggestions(max: 1);
-      return [
-        'Open $plantHint plant',
-        'Plant energy',
-        'Plant revenue',
-        'Open dashboard',
-      ];
-    } else if (url.contains('/inverters')) {
-      return [
-        'Open dashboard',
-        'Show sensors',
-        'Go back',
-      ];
-    } else {
-      return [
-        'Open plants',
-        'Show sensors',
-        'Show inverters',
-        'Show energy',
-      ];
+      return ['Get sensor value', 'Go back', 'Open dashboard'];
     }
+
+    // Sensors list page
+    if (url.contains('/sensors')) {
+      return ['Filter WMS', 'Filter MFM', 'Filter Temperature', 'Open dashboard'];
+    }
+
+    // Plant detail page
+    if (url.contains('/plants') && url.contains('details')) {
+      return ['Show energy data', 'Show revenue data', 'Go back'];
+    }
+
+    // Plants list page
+    if (url.contains('/plants')) {
+      return ['Open dashboard', 'Show sensors', 'Show inverters'];
+    }
+
+    // Inverters page
+    if (url.contains('/inverters')) {
+      return ['Open dashboard', 'Show sensors', 'Go back'];
+    }
+
+    // SLMs page
+    if (url.contains('/slms')) {
+      return ['Open dashboard', 'Open sensors', 'Open plants'];
+    }
+
+    // Dashboard (default)
+    return ['Open plants', 'Show sensors', 'Show inverters', 'Show energy'];
   }
 
   @override
