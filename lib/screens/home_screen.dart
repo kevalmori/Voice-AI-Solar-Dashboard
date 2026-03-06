@@ -25,6 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isProcessing = false;
   bool _isChatExpanded = false;
   String _currentPageTitle = 'Dashboard';
+  double _panelHeight = 0; // Tracks the current panel height in pixels
 
   @override
   void initState() {
@@ -269,35 +270,79 @@ class _HomeScreenState extends State<HomeScreen> {
                       bottom: 16,
                       right: 16,
                       child: FloatingActionButton(
-                        onPressed: () => setState(() => _isChatExpanded = true),
+                        onPressed: () {
+                          final maxH = MediaQuery.of(context).size.height * 0.45;
+                          setState(() {
+                            _panelHeight = maxH;
+                            _isChatExpanded = true;
+                          });
+                        },
                         backgroundColor: const Color(0xFF6C63FF),
                         child: const Icon(Icons.auto_awesome, color: Colors.white),
                       ),
                     ),
 
-                  // Chat panel (bottom sheet style)
+                  // Chat panel (smooth resizable slider)
                   if (_isChatExpanded)
                     Positioned(
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      child: GestureDetector(
-                        onVerticalDragEnd: (details) {
-                          if (details.primaryVelocity! > 200) {
-                            setState(() => _isChatExpanded = false);
-                          }
-                        },
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxHeight: MediaQuery.of(context).size.height * 0.5,
-                          ),
-                          child: ChatPanel(
-                            messages: _messages,
-                            isProcessing: _isProcessing,
-                            onSendMessage: _handleSendMessage,
-                            suggestions: _suggestions,
-                            onSuggestionTap: _handleSendMessage,
-                          ),
+                      child: SizedBox(
+                        height: _panelHeight,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // ── Drag handle (only this area is draggable) ──
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onVerticalDragUpdate: (details) {
+                                final maxH = MediaQuery.of(context).size.height * 0.85;
+                                setState(() {
+                                  _panelHeight -= details.delta.dy;
+                                  _panelHeight = _panelHeight.clamp(160.0, maxH);
+                                });
+                              },
+                              onVerticalDragEnd: (details) {
+                                // Only collapse if dragged very small
+                                if (_panelHeight < 170) {
+                                  setState(() {
+                                    _isChatExpanded = false;
+                                    _panelHeight = 0;
+                                  });
+                                }
+                                // Otherwise stay at current height
+                              },
+                              child: Container(
+                                width: double.infinity,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF1A1A2E),
+                                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                child: Center(
+                                  child: Container(
+                                    width: 40,
+                                    height: 4,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white38,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // ── Chat content (fills remaining space) ──
+                            Expanded(
+                              child: ChatPanel(
+                                messages: _messages,
+                                isProcessing: _isProcessing,
+                                onSendMessage: _handleSendMessage,
+                                suggestions: _suggestions,
+                                onSuggestionTap: _handleSendMessage,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

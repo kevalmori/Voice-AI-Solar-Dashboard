@@ -33,6 +33,8 @@ class _ChatPanelState extends State<ChatPanel> {
   void initState() {
     super.initState();
     _initSpeech();
+    // Scroll to bottom on first mount so the panel always shows the latest messages
+    _scrollToBottom();
   }
 
   Future<void> _initSpeech() async {
@@ -92,8 +94,9 @@ class _ChatPanelState extends State<ChatPanel> {
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
+        // With reverse: true, position 0 is the bottom (latest messages)
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
+          0,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
@@ -111,9 +114,9 @@ class _ChatPanelState extends State<ChatPanel> {
   @override
   Widget build(BuildContext context) {
     return Container(
+      clipBehavior: Clip.hardEdge,
       decoration: const BoxDecoration(
         color: Color(0xFF1A1A2E),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         boxShadow: [
           BoxShadow(
             color: Colors.black54,
@@ -125,16 +128,6 @@ class _ChatPanelState extends State<ChatPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Drag handle
-          Container(
-            margin: const EdgeInsets.only(top: 8),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.white24,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
 
           // Chat header
           Padding(
@@ -197,10 +190,16 @@ class _ChatPanelState extends State<ChatPanel> {
           Flexible(
             child: ListView.builder(
               controller: _scrollController,
+              reverse: true,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               shrinkWrap: true,
               itemCount: widget.messages.length,
-              itemBuilder: (context, index) => _buildMessage(widget.messages[index]),
+              itemBuilder: (context, index) {
+                // With reverse: true, index 0 is at the bottom.
+                // Map so that the latest message (last in the list) is at index 0.
+                final msgIndex = widget.messages.length - 1 - index;
+                return _buildMessage(widget.messages[msgIndex]);
+              },
             ),
           ),
 

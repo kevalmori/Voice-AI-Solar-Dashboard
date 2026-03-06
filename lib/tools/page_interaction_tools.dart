@@ -200,13 +200,37 @@ class PageInteractionTools {
     return result;
   }
 
-  /// Search for text in a search input on the current page
+  /// Search for text in a search input on the current page.
+  /// Tries multiple selector strategies for cross-device compatibility.
   Future<String> searchOnPage(String query) async {
     final safeQuery = _escapeJs(query);
-    return await webView.typeIntoInput(
-      'input[type="text"], input[type="search"], input[placeholder*="Search"], input[placeholder*="search"]',
-      safeQuery,
-    );
+
+    // Try multiple selectors in order of specificity
+    final selectors = [
+      'input[type="search"]',
+      'input[placeholder*="Search"]',
+      'input[placeholder*="search"]',
+      'input[role="searchbox"]',
+      '.MuiInputBase-input',
+      '.MuiOutlinedInput-input',
+      'input[type="text"]',
+      'input:not([type="hidden"]):not([type="password"])',
+    ];
+
+    for (final selector in selectors) {
+      // Check if this selector finds an element
+      final checkResult = await webView.executeJS(
+        'document.querySelector(\'$selector\') !== null'
+      );
+      if (checkResult.toString() == 'true') {
+        final result = await webView.typeIntoInput(selector, safeQuery);
+        if (!result.contains('Element not found')) {
+          return result;
+        }
+      }
+    }
+
+    return 'No search input found on the page';
   }
 
   /// Click on a table row by matching text content
@@ -452,139 +476,108 @@ class PageInteractionTools {
     return result;
   }
 
-  /// Change the displayed month by clicking the specific navigation arrows
-  /// next to the month label on the dashboard. The dashboard shows full month
-  /// names (e.g. "March") in a <p> tag flanked by two MuiIconButton-root arrows.
+  /// Change the displayed month by clicking [Prev] or [Next] arrows in the
+  /// month navigation control: [Prev btn] [Month label] [Next btn].
+  ///
+  /// The dashboard is LINEAR (not circular): going from March to December
+  /// means clicking Prev through Feb, Jan, then crossing the year boundary
+  /// into Dec of the previous year.
   Future<String> changeMonth(String targetMonth) async {
-    final safeMonth = _escapeJs(targetMonth);
-
-    // Step 1: Ensure "Monthly" view is selected (month arrows only appear in Monthly view)
+    // Step 1: Ensure "Monthly" view is selected
     await clickByText('Monthly');
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future.delayed(const Duration(milliseconds: 2000));
 
-    // Step 2: Read the current month from the page and calculate direction
-    final planScript = '''
+    final months = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+
+    // Resolve target index
+    int targetIdx = -1;
+    final tLower = targetMonth.toLowerCase();
+    for (int i = 0; i < months.length; i++) {
+      if (months[i].toLowerCase() == tLower ||
+          months[i].substring(0, 3).toLowerCase() == tLower) {
+        targetIdx = i;
+        break;
+      }
+    }
+    if (targetIdx == -1) return 'Unknown month: $targetMonth';
+
+    // JS: Read current month AND click an arrow in one shot.
+    // dir = 'prev' clicks btn[0], 'next' clicks btn[last], 'read' just reads.
+    String navJS(String dir) => '''
       (function() {
-        var fullMonths = ['January','February','March','April','May','June',
-                          'July','August','September','October','November','December'];
-        var shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        var months = ['January','February','March','April','May','June',
+                      'July','August','September','October','November','December'];
+        var short  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-        // Find target index (match both short and full names)
-        var targetIdx = -1;
-        var targetLower = '$safeMonth'.toLowerCase();
-        for (var i = 0; i < fullMonths.length; i++) {
-          if (fullMonths[i].toLowerCase() === targetLower ||
-              shortMonths[i].toLowerCase() === targetLower) {
-            targetIdx = i;
-            break;
-          }
-        }
-        if (targetIdx === -1) return JSON.stringify({error: 'Unknown month: $safeMonth'});
+        // Find the nav container: direct children = [Button, MonthText, Button]
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+          var ch = all[i].children;
+          if (ch.length < 2 || ch.length > 10) continue;
 
-        // Find the month label: look for a <p> or <span> that contains exactly a month name
-        var currentIdx = -1;
-        var labels = document.querySelectorAll('p, span, h6');
-        for (var i = 0; i < labels.length; i++) {
-          var txt = labels[i].innerText.trim();
-          for (var m = 0; m < fullMonths.length; m++) {
-            if (txt === fullMonths[m] || txt === shortMonths[m]) {
-              currentIdx = m;
-              break;
-            }
-          }
-          if (currentIdx >= 0) break;
-        }
-        if (currentIdx === -1) return JSON.stringify({error: 'Could not detect current month on page'});
-        if (currentIdx === targetIdx) return JSON.stringify({error: 'Already on ' + fullMonths[targetIdx]});
-
-        // Calculate shortest direction
-        var forwardSteps = (targetIdx - currentIdx + 12) % 12;
-        var backwardSteps = (currentIdx - targetIdx + 12) % 12;
-        var direction = forwardSteps <= backwardSteps ? 'next' : 'prev';
-        var steps = Math.min(forwardSteps, backwardSteps);
-
-        return JSON.stringify({
-          current: fullMonths[currentIdx],
-          target: fullMonths[targetIdx],
-          direction: direction,
-          steps: steps
-        });
-      })()
-    ''';
-    final planResult = await webView.executeJS(planScript);
-
-    // Parse result
-    final cleaned = planResult.replaceAll(RegExp(r'^"|"$'), '').replaceAll(r'\"', '"');
-
-    if (cleaned.contains('"error"')) {
-      final errorMatch = RegExp(r'"error"\s*:\s*"([^"]+)"').firstMatch(cleaned);
-      return errorMatch?.group(1) ?? 'Error detecting month';
-    }
-
-    final dirMatch = RegExp(r'"direction"\s*:\s*"(\w+)"').firstMatch(cleaned);
-    final stepsMatch = RegExp(r'"steps"\s*:\s*(\d+)').firstMatch(cleaned);
-    final targetMatch = RegExp(r'"target"\s*:\s*"(\w+)"').firstMatch(cleaned);
-
-    if (dirMatch == null || stepsMatch == null) {
-      return 'Could not determine navigation direction';
-    }
-
-    final direction = dirMatch.group(1)!;
-    final steps = int.parse(stepsMatch.group(1)!);
-    final target = targetMatch?.group(1) ?? targetMonth;
-
-    // Step 3: Click the specific month arrow buttons N times
-    // The arrows are MuiIconButton-root siblings of the month <p> label
-    for (int i = 0; i < steps; i++) {
-      final clickScript = '''
-        (function() {
-          var fullMonths = ['January','February','March','April','May','June',
-                            'July','August','September','October','November','December'];
-          var shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-          // Find the month label element
-          var monthLabel = null;
-          var labels = document.querySelectorAll('p, span, h6');
-          for (var i = 0; i < labels.length; i++) {
-            var txt = labels[i].innerText.trim();
-            for (var m = 0; m < fullMonths.length; m++) {
-              if (txt === fullMonths[m] || txt === shortMonths[m]) {
-                monthLabel = labels[i];
-                break;
+          var btns = [];
+          var mIdx = -1;
+          for (var j = 0; j < ch.length; j++) {
+            var c = ch[j];
+            if (c.tagName === 'BUTTON' || c.classList.contains('MuiIconButton-root') ||
+                c.getAttribute('role') === 'button') {
+              btns.push(c);
+            } else {
+              var t = (c.innerText || '').trim();
+              for (var m = 0; m < months.length; m++) {
+                if (t === months[m] || t === short[m]) { mIdx = m; break; }
               }
             }
-            if (monthLabel) break;
-          }
-          if (!monthLabel) return 'Month label not found';
-
-          // Find arrow buttons near the month label (siblings in the parent container)
-          var parent = monthLabel.parentElement;
-          if (!parent) return 'Parent container not found';
-
-          var buttons = parent.querySelectorAll('button, .MuiIconButton-root');
-          if (buttons.length < 2) {
-            // Try grandparent
-            parent = parent.parentElement;
-            if (parent) buttons = parent.querySelectorAll('button, .MuiIconButton-root');
           }
 
-          if (buttons.length >= 2) {
-            // First button = prev (left arrow), last button = next (right arrow)
-            var btn = '${direction == 'next' ? 'true' : 'false'}' === 'true'
-                      ? buttons[buttons.length - 1]
-                      : buttons[0];
-            btn.click();
-            return 'Clicked $direction arrow';
+          if (btns.length >= 2 && mIdx >= 0) {
+            if ('$dir' === 'prev') {
+              btns[0].click();
+            } else if ('$dir' === 'next') {
+              btns[btns.length - 1].click();
+            }
+            return JSON.stringify({idx: mIdx, month: months[mIdx]});
           }
+        }
+        return JSON.stringify({idx: -1});
+      })()
+    ''';
 
-          return 'Navigation arrows not found near month label';
-        })()
-      ''';
-      await webView.executeJS(clickScript);
-      await Future.delayed(const Duration(milliseconds: 800));
+    // Step 2: Read current month
+    final initRaw = await webView.executeJS(navJS('read'));
+    final initMatch = RegExp(r'"idx"\s*:\s*(\d+)').firstMatch(
+      initRaw.replaceAll(RegExp(r'^"|"$'), '').replaceAll(r'\"', '"'));
+    if (initMatch == null) return 'Month navigation not found on page';
+    int curIdx = int.parse(initMatch.group(1)!);
+
+    if (curIdx == targetIdx) return 'Already on ${months[targetIdx]}';
+
+    // Step 3: Click prev or next step by step (up to 24 for year crossings)
+    for (int i = 0; i < 24; i++) {
+      // Simple: if target month index < current, go prev; if >, go next
+      final dir = (targetIdx < curIdx) ? 'prev' : 'next';
+      await webView.executeJS(navJS(dir));
+      await Future.delayed(const Duration(milliseconds: 700));
+
+      // Re-read current month
+      final raw = await webView.executeJS(navJS('read'));
+      final m = RegExp(r'"idx"\s*:\s*(\d+)').firstMatch(
+        raw.replaceAll(RegExp(r'^"|"$'), '').replaceAll(r'\"', '"'));
+      if (m == null) return 'Lost month navigation';
+
+      final newIdx = int.parse(m.group(1)!);
+
+      // Check if we reached the target
+      if (newIdx == targetIdx) return 'Changed to ${months[targetIdx]}';
+
+      // If index didn't change, we hit a boundary — stop
+      if (newIdx == curIdx) return 'Reached boundary at ${months[curIdx]}, cannot navigate further';
+
+      curIdx = newIdx;
     }
 
-    return 'Changed to $target';
+    return 'Changed to ${months[targetIdx]}';
   }
 
   /// Change the displayed year by clicking the specific navigation arrows

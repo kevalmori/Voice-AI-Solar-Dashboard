@@ -208,8 +208,20 @@ class CommandRouter {
           yearResponse = ' $yearResult';
         }
 
+        // If user also specified a month (e.g. "show monthly revenue of december"),
+        // navigate to that month after switching the tab
+        final month = _extractMonth(text);
+        String monthResponse = '';
+        if (month != null) {
+          // Wait for Monthly view to fully render with month arrows
+          await Future.delayed(const Duration(milliseconds: 2000));
+          tools.add(_tool('change_month', {'month': month}));
+          final monthResult = await _toolRegistry.executeTool('change_month', {'month': month});
+          monthResponse = ' $monthResult';
+        }
+
         return CommandResult(
-          response: 'Switched to $tab${period != null ? " ($period)" : ""} view.$yearResponse',
+          response: 'Switched to $tab${period != null ? " ($period)" : ""} view.$yearResponse$monthResponse',
           toolCalls: _markDone(tools),
           suggestions: ['Show $otherTab', 'Yearly', 'Monthly', 'Open plants'],
         );
@@ -483,26 +495,45 @@ class CommandRouter {
     return null;
   }
 
-  /// Extract month name from text
+  /// Extract month name from text.
+  /// Full names are checked BEFORE abbreviations so that e.g. 'december'
+  /// matches 'December' and not the shorter 'dec' → 'Dec'.
   String? _extractMonth(String text) {
-    final months = {
-      'january': 'January', 'jan': 'Jan',
-      'february': 'February', 'feb': 'Feb',
-      'march': 'March', 'mar': 'Mar',
-      'april': 'April', 'apr': 'Apr',
-      'may': 'May',
-      'june': 'June', 'jun': 'Jun',
-      'july': 'July', 'jul': 'Jul',
-      'august': 'August', 'aug': 'Aug',
-      'september': 'September', 'sep': 'Sep', 'sept': 'Sep',
-      'october': 'October', 'oct': 'Oct',
-      'november': 'November', 'nov': 'Nov',
-      'december': 'December', 'dec': 'Dec',
-    };
-    for (final entry in months.entries) {
-      if (text.contains(entry.key)) {
-        return entry.value;
-      }
+    // Full names first (longest match wins)
+    const fullMonths = [
+      ['january', 'January'],
+      ['february', 'February'],
+      ['march', 'March'],
+      ['april', 'April'],
+      ['may', 'May'],
+      ['june', 'June'],
+      ['july', 'July'],
+      ['august', 'August'],
+      ['september', 'September'],
+      ['october', 'October'],
+      ['november', 'November'],
+      ['december', 'December'],
+    ];
+    for (final pair in fullMonths) {
+      if (text.contains(pair[0])) return pair[1];
+    }
+    // Then abbreviations
+    const shortMonths = [
+      ['sept', 'September'],
+      ['jan', 'January'],
+      ['feb', 'February'],
+      ['mar', 'March'],
+      ['apr', 'April'],
+      ['jun', 'June'],
+      ['jul', 'July'],
+      ['aug', 'August'],
+      ['sep', 'September'],
+      ['oct', 'October'],
+      ['nov', 'November'],
+      ['dec', 'December'],
+    ];
+    for (final pair in shortMonths) {
+      if (text.contains(pair[0])) return pair[1];
     }
     return null;
   }
