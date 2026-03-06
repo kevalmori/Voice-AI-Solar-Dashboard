@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/chat_message.dart';
 import '../services/command_router.dart';
-import '../services/llm_service.dart';
 import '../services/webview_controller_service.dart';
 import '../tools/tool_registry.dart';
 import '../widgets/chat_panel.dart';
@@ -18,7 +17,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final WebViewControllerService _webViewService = WebViewControllerService();
   late final ToolRegistry _toolRegistry;
   late final CommandRouter _commandRouter;
-  late final LlmService _llmService;
 
   final List<ChatMessage> _messages = [];
   List<String> _suggestions = [];
@@ -30,7 +28,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _toolRegistry = ToolRegistry(_webViewService);
     _commandRouter = CommandRouter(_toolRegistry);
-    _llmService = LlmService(toolRegistry: _toolRegistry);
 
     // Add welcome message
     _messages.add(ChatMessage(
@@ -72,60 +69,21 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      // 1) Try local command router first (fast, no API call)
-      final localResult = await _commandRouter.processMessage(message);
+      // Process via local command router (no external API calls)
+      final result = await _commandRouter.processMessage(message);
 
-      if (localResult.matched) {
-        // Local match — use it directly
-        setState(() {
-          _messages[loadingIndex] = ChatMessage(
-            role: MessageRole.assistant,
-            content: localResult.response,
-            toolCalls: localResult.toolCalls.isNotEmpty ? localResult.toolCalls : null,
-          );
-          _isProcessing = false;
-          _suggestions = _parseSuggestions(localResult.response);
-          if (_suggestions.isEmpty) {
-            _suggestions = _getContextualSuggestions();
-          }
-        });
-      } else {
-        // 2) No local match — fall back to Gemini LLM
-        final toolCalls = <ToolCallInfo>[];
-        final llmResult = await _llmService.sendMessage(
-          message,
-          onToolCall: (name, args) {
-            toolCalls.add(ToolCallInfo(name: name, arguments: args, isExecuting: true));
-            setState(() {
-              _messages[loadingIndex] = ChatMessage(
-                role: MessageRole.assistant,
-                content: '',
-                isLoading: true,
-                toolCalls: List.from(toolCalls),
-              );
-            });
-          },
-          onToolResult: (name, result) {
-            final idx = toolCalls.lastIndexWhere((t) => t.name == name);
-            if (idx >= 0) {
-              toolCalls[idx] = toolCalls[idx].copyWith(isExecuting: false, result: result);
-            }
-          },
+      setState(() {
+        _messages[loadingIndex] = ChatMessage(
+          role: MessageRole.assistant,
+          content: result.response,
+          toolCalls: result.toolCalls.isNotEmpty ? result.toolCalls : null,
         );
-
-        setState(() {
-          _messages[loadingIndex] = ChatMessage(
-            role: MessageRole.assistant,
-            content: llmResult.content,
-            toolCalls: toolCalls.isNotEmpty ? toolCalls : null,
-          );
-          _isProcessing = false;
-          _suggestions = _parseSuggestions(llmResult.content);
-          if (_suggestions.isEmpty) {
-            _suggestions = _getContextualSuggestions();
-          }
-        });
-      }
+        _isProcessing = false;
+        _suggestions = _parseSuggestions(result.response);
+        if (_suggestions.isEmpty) {
+          _suggestions = _getContextualSuggestions();
+        }
+      });
     } catch (e) {
       setState(() {
         _messages[loadingIndex] = ChatMessage(

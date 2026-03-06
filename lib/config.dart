@@ -1,8 +1,4 @@
 class AppConfig {
-  static const String geminiApiKey = 'AIzaSyDvS0PL7TCBoBuMpHytsmbbkapzfEWeNlY';
-  static const String geminiModel = 'gemini-2.5-flash';
-  static const String geminiBaseUrl =
-      'https://generativelanguage.googleapis.com/v1beta/models';
   static const String websiteBaseUrl = 'https://aalok.dyulabs.co.in';
   static const String dashboardUrl = '$websiteBaseUrl/dashboard';
 

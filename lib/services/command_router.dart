@@ -244,10 +244,15 @@ class CommandRouter {
       }
     }
 
-    // ── No match → let home_screen fall back to LLM ──
+    // ── No match — provide helpful fallback message ──
     return CommandResult(
-      matched: false,
-      response: '',
+      matched: true,
+      response: 'Sorry, I didn\'t understand that command.\n\n'
+          'Here are some things you can try:\n'
+          '1. Open GOA plant\n'
+          '2. Show sensors\n'
+          '3. Show inverters\n'
+          '4. Open dashboard',
     );
   }
 

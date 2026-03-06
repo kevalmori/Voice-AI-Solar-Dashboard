@@ -16,9 +16,7 @@ User
 ↓
 Mobile App
 ↓
-Backend API
-↓
-LLM Engine
+Local Command Router
 ↓
 Automation Engine
 ↓
@@ -40,27 +38,11 @@ Recommended framework:
 
 ---
 
-### Backend API
+### Local Command Router
 Responsibilities:
-- Process user commands
-- Communicate with LLM
-- Generate automation steps
-
-Recommended stack:
-- Node.js
-- Python
-
----
-
-### LLM Layer
-Responsibilities:
-- Understand user intent
-- Convert commands to structured tasks
+- Pattern-match user commands locally (no external API)
+- Convert commands to structured tool calls
 - Suggest next actions
-
-Examples:
-- OpenAI
-- Google Gemini
 
 ---
 
