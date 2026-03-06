@@ -80,21 +80,11 @@ class CommandRouter {
     }
 
     // ── Sensor commands ──
-    if (_containsAny(text, ['sensor'])) {
-      // Check for specific sensor name
-      final sensorName = _extractSensorName(text);
-
-      if (sensorName != null) {
-        tools.add(_tool('open_sensor_by_name', {'name': sensorName}));
-        await _toolRegistry.executeTool(
-            'open_sensor_by_name', {'name': sensorName});
-        return CommandResult(
-          response: 'Opened sensor $sensorName.\n\nWhat would you like to do?\n1. Get sensor value\n2. Get sensor category\n3. Go back to sensors',
-          toolCalls: _markDone(tools),
-        );
-      }
-
-      // Filter by type?
+    // Also trigger on sensor identifier keywords (e.g. "open cant temp 1" without saying "sensor")
+    if (_containsAny(text, ['sensor', 'sensors']) ||
+        (_containsAny(text, ['cant', 'mould', 'sps', 'radiation']) &&
+         !_containsAny(text, ['inverter', 'plant']))) {
+      // Filter by type FIRST (WMS, MFM, Temperature, All)
       final filterType = _extractSensorType(text);
       if (filterType != null) {
         tools.add(_tool('filter_sensors_by_type', {'type': filterType}));
@@ -102,6 +92,18 @@ class CommandRouter {
             'filter_sensors_by_type', {'type': filterType});
         return CommandResult(
           response: 'Showing $filterType sensors.\n\nWhat next?\n1. Open a specific sensor\n2. Show all sensors\n3. Go back to dashboard',
+          toolCalls: _markDone(tools),
+        );
+      }
+
+      // Check for specific sensor name
+      final sensorName = _extractSensorName(text);
+      if (sensorName != null) {
+        tools.add(_tool('open_sensor_by_name', {'name': sensorName}));
+        await _toolRegistry.executeTool(
+            'open_sensor_by_name', {'name': sensorName});
+        return CommandResult(
+          response: 'Opened sensor $sensorName.\n\nWhat would you like to do?\n1. Get sensor value\n2. Get sensor category\n3. Go back to sensors',
           toolCalls: _markDone(tools),
         );
       }
@@ -303,8 +305,17 @@ class CommandRouter {
     return null;
   }
 
-  /// Extract sensor filter type from text
+  /// Extract sensor filter type from text.
+  /// Returns null if the text contains specific sensor identifiers or numbers,
+  /// because that means the user is referring to a specific sensor (e.g. "cant temp 1")
+  /// rather than a category (e.g. "show WMS sensors").
   String? _extractSensorType(String text) {
+    // If specific sensor identifiers are present, user means a specific sensor, not a category
+    if (['cant', 'mould', 'sps'].any((id) => text.contains(id))) return null;
+
+    // If a number is present (e.g. "mfm 1"), it's a specific sensor, not a category
+    if (RegExp(r'\d').hasMatch(text)) return null;
+
     if (text.contains('wms')) return 'WMS';
     if (text.contains('mfm')) return 'MFM';
     if (text.contains('temperature') || text.contains('temp')) return 'Temperature';
