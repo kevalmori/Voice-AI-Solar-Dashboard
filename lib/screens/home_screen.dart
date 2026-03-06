@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/chat_message.dart';
 import '../services/command_router.dart';
 import '../services/webview_controller_service.dart';
+import '../services/web_data_discovery.dart';
 import '../tools/tool_registry.dart';
 import '../widgets/chat_panel.dart';
 import '../widgets/webview_container.dart';
@@ -16,6 +17,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final WebViewControllerService _webViewService = WebViewControllerService();
   late final ToolRegistry _toolRegistry;
+  late final WebDataDiscovery _discovery;
   late final CommandRouter _commandRouter;
 
   final List<ChatMessage> _messages = [];
@@ -28,13 +30,21 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _toolRegistry = ToolRegistry(_webViewService);
-    _commandRouter = CommandRouter(_toolRegistry);
+    _discovery = WebDataDiscovery(_webViewService);
+    _commandRouter = CommandRouter(_toolRegistry, _discovery);
 
-    // Listen for URL changes to update the header title
+    // Listen for URL changes to update the header title and discover data
     _webViewService.onUrlChanged = (url) {
       setState(() {
         _currentPageTitle = _getPageTitle(url);
       });
+      // Run lightweight init (nav links only) on first load
+      if (!_discovery.isReady && url.contains('aalok.dyulabs.co.in')) {
+        _discovery.runInitialDiscovery();
+      }
+      // Opportunistically scrape data from the page the user navigated to
+      // (wait for page to load first)
+      _discoverFromPageAfterDelay();
     };
 
     // Add welcome message
@@ -43,15 +53,23 @@ class _HomeScreenState extends State<HomeScreen> {
       content:
           'Hello! I\'m your AI assistant for the solar monitoring dashboard. '
           'You can ask me to navigate, search sensors, read values, and more.\n\n'
-          'Try saying: "open GOA plant" or "show sensors"',
+          'Try saying: "open plants" or "show sensors"',
     ));
 
     _suggestions = [
       'Open dashboard',
-      'Open GOA plant',
+      'Open plants',
       'Show sensors',
       'Show inverters',
     ];
+  }
+
+  /// Wait for the current page to load, then scrape its data into the cache.
+  /// This runs in the background — no navigation, no page disruption.
+  Future<void> _discoverFromPageAfterDelay() async {
+    await Future.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
+    await _discovery.discoverFromCurrentPage();
   }
 
   /// Derive a friendly page title from the current URL
@@ -166,10 +184,12 @@ class _HomeScreenState extends State<HomeScreen> {
         'Open dashboard',
       ];
     } else if (url.contains('/sensors')) {
+      // Use dynamically discovered sensor types
+      final types = _discovery.getSensorTypeSuggestions();
       return [
-        'Open radiation sensor',
-        'Show temperature sensors',
-        'Show MFM sensors',
+        'Open a sensor',
+        'Filter by type ($types)',
+        'Go back',
         'Open dashboard',
       ];
     } else if (url.contains('/plants') && url.contains('Details')) {
@@ -180,10 +200,12 @@ class _HomeScreenState extends State<HomeScreen> {
         'Go back',
       ];
     } else if (url.contains('/plants')) {
+      // Use dynamically discovered plant names
+      final plantHint = _discovery.getPlantSuggestions(max: 1);
       return [
-        'Open GOA plant',
-        'GOA yearly revenue',
-        'GOA energy',
+        'Open $plantHint plant',
+        'Plant energy',
+        'Plant revenue',
         'Open dashboard',
       ];
     } else if (url.contains('/inverters')) {
@@ -194,7 +216,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ];
     } else {
       return [
-        'Open GOA plant',
+        'Open plants',
         'Show sensors',
         'Show inverters',
         'Show energy',

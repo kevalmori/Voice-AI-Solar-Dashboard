@@ -1,5 +1,6 @@
 import '../tools/tool_registry.dart';
 import '../models/chat_message.dart';
+import '../services/web_data_discovery.dart';
 
 /// A command result from the local router
 class CommandResult {
@@ -12,10 +13,14 @@ class CommandResult {
 
 /// Locally matches user input to tool functions using keyword/pattern matching.
 /// No API calls — everything runs on-device.
+///
+/// ALL data (plants, sensors, inverters, types) is discovered dynamically from
+/// the website at runtime via [WebDataDiscovery]. Nothing is hardcoded.
 class CommandRouter {
   final ToolRegistry _toolRegistry;
+  final WebDataDiscovery _discovery;
 
-  CommandRouter(this._toolRegistry);
+  CommandRouter(this._toolRegistry, this._discovery);
 
   /// Try to match user input to a known command.
   Future<CommandResult> processMessage(String input) async {
@@ -37,7 +42,7 @@ class CommandRouter {
       // ── Plant commands ──
       if (_matches(text, ['plant']) &&
           !_containsAny(text, ['sensor', 'inverter', 'dashboard'])) {
-        final plantName = _extractPlantName(text);
+        final plantName = _extractEntityName(text, ['plant', 'plants']);
 
         if (plantName != null) {
           // Energy request for a specific plant
@@ -77,18 +82,21 @@ class CommandRouter {
         // No specific plant → open plants list
         tools.add(_tool('open_plants', {}));
         await _toolRegistry.executeTool('open_plants', {});
+        final plantSuggestions = _discovery.getPlantSuggestions();
         return CommandResult(
-          response: 'Opened the plants page.\n\nWhat would you like to do?\n1. Open a specific plant by name\n2. Show plant energy\n3. Show plant revenue',
+          response: 'Opened the plants page.\n\nKnown plants: $plantSuggestions\n\nWhat would you like to do?\n1. Open a specific plant by name\n2. Show plant energy\n3. Show plant revenue',
           toolCalls: _markDone(tools),
         );
       }
 
       // ── Sensor commands ──
+      // Dynamically check if any sensor keyword appears in the text
       if (_containsAny(text, ['sensor', 'sensors']) ||
-          (_containsAny(text, ['cant', 'mould', 'sps', 'radiation']) &&
+          (_discovery.textContainsSensorKeyword(text) &&
            !_containsAny(text, ['inverter', 'plant']))) {
-        final filterType = _extractSensorType(text);
-        if (filterType != null) {
+        // Check for sensor type filter
+        final filterType = _discovery.matchSensorType(text);
+        if (filterType != null && !_hasSpecificItemIdentifier(text)) {
           tools.add(_tool('filter_sensors_by_type', {'type': filterType}));
           await _toolRegistry.executeTool(
               'filter_sensors_by_type', {'type': filterType});
@@ -98,7 +106,7 @@ class CommandRouter {
           );
         }
 
-        final sensorName = _extractSensorName(text);
+        final sensorName = _extractEntityName(text, ['sensor', 'sensors']);
         if (sensorName != null) {
           tools.add(_tool('open_sensor_by_name', {'name': sensorName}));
           await _toolRegistry.executeTool(
@@ -111,15 +119,17 @@ class CommandRouter {
 
         tools.add(_tool('open_sensors', {}));
         await _toolRegistry.executeTool('open_sensors', {});
+        final sensorSuggestions = _discovery.getSensorSuggestions();
+        final typeSuggestions = _discovery.getSensorTypeSuggestions();
         return CommandResult(
-          response: 'Opened the sensors page.\n\nAvailable sensors: CANT_RADIATION_1, CANT_TEMP_1, CANT_MFM_1, MOULD_MFM_2, SPS_MFM_3\n\nWhat would you like to do?\n1. Open a specific sensor\n2. Filter by type (WMS, MFM, Temperature)\n3. Go back to dashboard',
+          response: 'Opened the sensors page.\n\nAvailable sensors: $sensorSuggestions\n\nWhat would you like to do?\n1. Open a specific sensor\n2. Filter by type ($typeSuggestions)\n3. Go back to dashboard',
           toolCalls: _markDone(tools),
         );
       }
 
       // ── Inverter commands ──
       if (_containsAny(text, ['inverter'])) {
-        final inverterName = _extractInverterName(text);
+        final inverterName = _extractEntityName(text, ['inverter', 'inverters']);
         if (inverterName != null) {
           tools.add(_tool('open_inverter_by_name', {'name': inverterName}));
           await _toolRegistry.executeTool(
@@ -132,8 +142,9 @@ class CommandRouter {
 
         tools.add(_tool('open_inverters', {}));
         await _toolRegistry.executeTool('open_inverters', {});
+        final inverterSuggestions = _discovery.getInverterSuggestions();
         return CommandResult(
-          response: 'Opened the inverters page.\n\nWhat would you like to do?\n1. Search for a specific inverter\n2. Go back to dashboard',
+          response: 'Opened the inverters page.\n\nKnown inverters: $inverterSuggestions\n\nWhat would you like to do?\n1. Search for a specific inverter\n2. Go back to dashboard',
           toolCalls: _markDone(tools),
         );
       }
@@ -149,7 +160,6 @@ class CommandRouter {
       }
 
       // ── Dashboard tab/period commands (energy/revenue) ──
-      // Now also matches "goa" since plant section handles goa+energy above
       if (_containsAny(text, ['energy', 'revenue'])) {
         final tab = _containsAny(text, ['revenue']) ? 'Revenue' : 'Energy';
         final period = _extractPeriod(text);
@@ -289,12 +299,13 @@ class CommandRouter {
         );
       }
 
-      // ── No match — provide helpful fallback ──
+      // ── No match — provide helpful fallback with dynamic suggestions ──
+      final plantHint = _discovery.getPlantSuggestions(max: 2);
       return CommandResult(
         matched: true,
         response: 'Sorry, I didn\'t understand that command.\n\n'
             'Here are some things you can try:\n'
-            '1. Open GOA plant\n'
+            '1. Open a plant (e.g. $plantHint)\n'
             '2. Show sensors\n'
             '3. Show energy / revenue\n'
             '4. Change month to April\n'
@@ -309,14 +320,14 @@ class CommandRouter {
             'You can try:\n'
             '1. Open dashboard\n'
             '2. Show sensors\n'
-            '3. Open GOA plant',
+            '3. Open plants',
       );
     }
   }
 
-  // ════════════════════════════════
+  // ════════════════════════════════════
   // Helper methods
-  // ════════════════════════════════
+  // ════════════════════════════════════
 
   bool _matches(String text, List<String> keywords) {
     return keywords.any((k) => text.contains(k));
@@ -326,69 +337,29 @@ class CommandRouter {
     return words.any((w) => text.contains(w));
   }
 
-  String? _extractPlantName(String text) {
-    // Strip command keywords to extract just the plant name fragment
+  /// Check if the text contains a specific item identifier (number or known name fragment)
+  bool _hasSpecificItemIdentifier(String text) {
+    // If there's a number, it's likely a specific item (e.g. "sensor 1")
+    if (RegExp(r'\d').hasMatch(text)) return true;
+    // If the text is long enough beyond the command words, it likely has a name
+    final stripped = text
+        .replaceAll(RegExp(r'\b(show|open|filter|sensors?|by|type|the|all|a|an)\b'), '')
+        .trim();
+    return stripped.length > 3;
+  }
+
+  /// Extract an entity name from text by removing filler/command words.
+  /// [entityKeywords] are additional domain words to strip (e.g. ['plant', 'plants']).
+  String? _extractEntityName(String text, List<String> entityKeywords) {
     final fillers = [
       'open', 'show', 'go', 'to', 'navigate', 'the', 'a', 'an',
-      'plant', 'plants', 'please', 'can', 'you', 'me', 'display',
+      'please', 'can', 'you', 'me', 'display',
       'energy', 'revenue', 'income', 'earning', 'earnings',
       'monthly', 'yearly', 'lifetime', 'month', 'year',
       'for', 'of', 'from', 'in', 'on', 'at', 'with',
       'details', 'detail', 'data', 'info', 'information',
       'check', 'get', 'find', 'select', 'switch', 'change',
-    ];
-    final words = text.split(RegExp(r'\s+'));
-    final remaining = words
-        .where((w) => w.isNotEmpty && !fillers.contains(w))
-        .join(' ')
-        .trim();
-    if (remaining.isNotEmpty) return remaining;
-    return null;
-  }
-
-  String? _extractSensorName(String text) {
-    final cleaned = text
-        .replaceAll(RegExp(r'\b(open|show|go to|navigate|sensor|sensors|the|a|an|please|can you|me)\b'), '')
-        .trim();
-
-    if (cleaned.isNotEmpty && cleaned != text) {
-      return cleaned;
-    }
-
-    final keywords = ['radiation', 'temp', 'temperature', 'mfm', 'cant', 'mould', 'sps'];
-    for (final k in keywords) {
-      if (text.contains(k)) {
-        final parts = keywords.where((w) => text.contains(w)).toList();
-        final numMatch = RegExp(r'(\d+)').firstMatch(text);
-        if (numMatch != null) parts.add(numMatch.group(1)!);
-        return parts.join(' ');
-      }
-    }
-
-    final numMatch = RegExp(r'(\d+)').firstMatch(text);
-    if (numMatch != null) return numMatch.group(1)!;
-
-    return null;
-  }
-
-  String? _extractSensorType(String text) {
-    if (['cant', 'mould', 'sps'].any((id) => text.contains(id))) return null;
-    if (RegExp(r'\d').hasMatch(text)) return null;
-    if (text.contains('wms')) return 'WMS';
-    if (text.contains('mfm')) return 'MFM';
-    if (text.contains('temperature') || text.contains('temp')) return 'Temperature';
-    if (text.contains('all')) return 'All';
-    return null;
-  }
-
-  String? _extractInverterName(String text) {
-    // Strip command keywords to extract just the inverter name fragment
-    final fillers = [
-      'open', 'show', 'go', 'to', 'navigate', 'the', 'a', 'an',
-      'please', 'can', 'you', 'me', 'display',
-      'for', 'of', 'from', 'in', 'on', 'at', 'with',
-      'details', 'detail', 'data', 'info', 'information',
-      'check', 'get', 'find', 'select', 'switch', 'change',
+      ...entityKeywords,
     ];
     final words = text.split(RegExp(r'\s+'));
     final remaining = words

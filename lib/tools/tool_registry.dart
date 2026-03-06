@@ -175,10 +175,11 @@ class ToolRegistry {
     for (int i = 0; i < 12; i++) {
       await Future.delayed(const Duration(milliseconds: 500));
       final check = await _pageTools.readPageContent();
-      if (check.toUpperCase().contains('DEVICE NAME') ||
-          check.toUpperCase().contains('CANT') ||
-          check.toUpperCase().contains('RADIATION') ||
-          check.toUpperCase().contains('MFM')) {
+      final upper = check.toUpperCase();
+      // Generic table-loaded check — no hardcoded sensor names
+      if (upper.contains('DEVICE NAME') ||
+          (upper.contains('NAME') && upper.contains('CATEGORY')) ||
+          RegExp(r'<tbody[^>]*>\s*<tr').hasMatch(check)) {
         break;
       }
     }
@@ -194,9 +195,11 @@ class ToolRegistry {
     for (int i = 0; i < 12; i++) {
       await Future.delayed(const Duration(milliseconds: 500));
       final check = await _pageTools.readPageContent();
-      if (check.toUpperCase().contains('DEVICE NAME') ||
-          check.toUpperCase().contains('CANT') ||
-          check.toUpperCase().contains('MFM')) {
+      final upper = check.toUpperCase();
+      // Generic table-loaded check — no hardcoded sensor names
+      if (upper.contains('DEVICE NAME') ||
+          (upper.contains('NAME') && upper.contains('CATEGORY')) ||
+          RegExp(r'<tbody[^>]*>\s*<tr').hasMatch(check)) {
         break;
       }
     }
