@@ -5,7 +5,7 @@ class AppConfig {
   /// Fallback system prompt used before dynamic discovery completes.
   /// Once WebDataDiscovery runs, it generates a full prompt with real data.
   static const String systemPrompt = '''
-You are an AI assistant controlling the aALoK solar monitoring dashboard. You help users navigate and interact with the website using tool calls.
+You are a smart assistant controlling the aALoK solar monitoring dashboard. You help users navigate and interact with the website using tool calls.
 
 IMPORTANT: Use combined tools that handle ALL steps automatically. Do NOT chain multiple tools — use the single combined tool instead.
 

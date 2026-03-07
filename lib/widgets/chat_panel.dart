@@ -146,7 +146,7 @@ class _ChatPanelState extends State<ChatPanel> {
                 ),
                 const SizedBox(width: 8),
                 const Text(
-                  'AI Assistant',
+                  'Smart Assistant',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 14,

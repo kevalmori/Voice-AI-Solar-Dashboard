@@ -132,7 +132,7 @@ class WebDataDiscovery {
         : '/dashboard, /plants, /inverters, /slmsDevices, /sensors';
 
     return '''
-You are an AI assistant controlling the aALoK solar monitoring dashboard. You help users navigate and interact with the website using tool calls.
+You are a smart assistant controlling the aALoK solar monitoring dashboard. You help users navigate and interact with the website using tool calls.
 
 IMPORTANT: Use combined tools that handle ALL steps automatically. Do NOT chain multiple tools — use the single combined tool instead.
 

@@ -52,7 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _messages.add(ChatMessage(
       role: MessageRole.assistant,
       content:
-          'Hello! I\'m your AI assistant for the solar monitoring dashboard. '
+          'Hello! I\'m your Smart Assistant for the solar monitoring dashboard. '
           'You can ask me to navigate, search sensors, read values, and more.\n\n'
           'Try saying: "open plants" or "show sensors"',
     ));
