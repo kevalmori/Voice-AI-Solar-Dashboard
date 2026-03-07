@@ -11,10 +11,8 @@ A Flutter mobile application that wraps the **aALoK Solar Monitoring Dashboard**
 | **Voice & Text Control** | Navigate the dashboard hands-free using natural language |
 | **On-Device AI** | All command routing runs locally — no external API calls |
 | **Dynamic Discovery** | Plants, sensors, inverters, and filter types are scraped at runtime — nothing hardcoded |
-| **Multi-Step Alert Flow** | Guided flow for filtering alerts: select plants → devices → date range |
 | **Fuzzy Matching** | Finds the best match even with voice transcription typos |
 | **Smart Suggestions** | Context-aware suggestion chips based on current page and action |
-| **Plant Detail Local Search** | "Select inverter X" or "filter by temperature" on a plant detail page stays on that page |
 
 ---
 
@@ -33,7 +31,7 @@ lib/
 ├── models/
 │   └── chat_message.dart              # Chat message & tool call models
 ├── services/
-│   ├── command_router.dart            # 🧠 Core: pattern-matches user input → tool calls
+│   ├── command_router.dart            # Core: pattern-matches user input → tool calls
 │   ├── web_data_discovery.dart        # Scrapes live data from the website at runtime
 │   └── webview_controller_service.dart # WebView controller + JS execution bridge
 └── tools/
@@ -68,68 +66,6 @@ User speaks / types
 
 ---
 
-## 🗣️ Supported Commands
-
-### Navigation
-| Command | Action |
-|---------|--------|
-| `open dashboard` | Navigate to dashboard |
-| `open plants` | Navigate to plants list |
-| `open sensors` | Navigate to sensors list |
-| `open inverters` | Navigate to inverters list |
-| `open slms` | Navigate to SLMs page |
-| `open alerts` | Open alerts page & start filter flow |
-| `go back` | Go to previous page |
-
-### Plant Commands
-| Command | Action |
-|---------|--------|
-| `open [plant name] plant` | Open a specific plant's detail page |
-| `show energy for [plant name]` | Show energy data for a plant |
-| `show yearly revenue for [plant name]` | Show revenue with period filter |
-
-### Sensor Commands
-| Command | Action |
-|---------|--------|
-| `open sensor [name]` | Open a specific sensor |
-| `filter wms` / `filter temperature` | Filter sensors by type |
-| `get sensor value` | Read current sensor reading |
-
-### Dashboard Tabs
-| Command | Action |
-|---------|--------|
-| `show energy` / `show revenue` | Switch dashboard tab |
-| `monthly` / `yearly` / `lifetime` | Change period view |
-| `change month to April` | Navigate to a specific month |
-| `year 2024` | Navigate to a specific year |
-| `next month` / `previous month` | Step through months |
-
-### Alert Flow (Multi-Step)
-| Step | Command |
-|------|---------|
-| Start | `open alerts` |
-| Select plants | Tap a plant suggestion or type a name |
-| More plants | `select more plants` |
-| Next step | `next: select devices` |
-| Select devices | Tap a device suggestion or type a name |
-| Set dates | `01/01/2026 to 07/03/2026` |
-| Cancel | `cancel` / `stop` / `exit` |
-
-### Plant Detail Page (Context-Aware)
-| Command | Action |
-|---------|--------|
-| `select [inverter name]` | Click item on current page only |
-| `filter by temperature` | Click filter tab on current page only |
-| `filter by inverter` | Click filter tab on current page only |
-
-### Other
-| Command | Action |
-|---------|--------|
-| `scroll up` / `scroll down` | Scroll the page |
-| `read page` | Read the current page content |
-
----
-
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -142,7 +78,7 @@ User speaks / types
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/kevalmori/Voice-AI-Solar-Dashboard
 cd Voice-AI-Solar-Dashboard
 
 # Install dependencies
@@ -171,19 +107,6 @@ The APK will be at `build/app/outputs/flutter-apk/app-release.apk`.
 
 ---
 
-## 🔧 Configuration
-
-Edit `lib/config.dart` to change the dashboard URL:
-
-```dart
-class AppConfig {
-  static const String websiteBaseUrl = 'https://aalok.dyulabs.co.in';
-  static const String dashboardUrl = '$websiteBaseUrl/dashboard';
-}
-```
-
----
-
 ## 📱 App Structure
 
 - **Header Bar** — Shows current page title, back button, refresh button
@@ -204,10 +127,5 @@ class AppConfig {
 - **No hardcoded data** — `WebDataDiscovery` scrapes plant/sensor/inverter names at runtime
 - **Fuzzy matching** — `clickBestMatch()` uses token overlap + edit distance for voice typo tolerance
 - **Context-aware routing** — Plant detail page commands stay local; other pages use standard navigation
-- **Alert state machine** — Multi-step flow with escape hatch for explicit navigation commands
 
 ---
-
-## 📄 License
-
-Private project — not published to pub.dev.
