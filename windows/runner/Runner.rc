@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.aalok" "\0"
-            VALUE "FileDescription", "aalok_dashboard" "\0"
+            VALUE "CompanyName", "com.dyulabs" "\0"
+            VALUE "FileDescription", "dyulabs" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "aalok_dashboard" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.aalok. All rights reserved." "\0"
-            VALUE "OriginalFilename", "aalok_dashboard.exe" "\0"
-            VALUE "ProductName", "aalok_dashboard" "\0"
+            VALUE "InternalName", "dyulabs" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.dyulabs. All rights reserved." "\0"
+            VALUE "OriginalFilename", "dyulabs.exe" "\0"
+            VALUE "ProductName", "dyulabs" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

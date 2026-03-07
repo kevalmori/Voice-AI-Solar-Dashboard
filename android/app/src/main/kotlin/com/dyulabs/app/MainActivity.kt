@@ -1,4 +1,4 @@
-package com.aalok.aalok_dashboard
+package com.dyulabs.app
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -10,16 +10,16 @@ void main() {
       statusBarIconBrightness: Brightness.light,
     ),
   );
-  runApp(const AalokDashboardApp());
+  runApp(const DyulabsApp());
 }
 
-class AalokDashboardApp extends StatelessWidget {
-  const AalokDashboardApp({super.key});
+class DyulabsApp extends StatelessWidget {
+  const DyulabsApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Aalok Dashboard',
+      title: 'DYULABS',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(

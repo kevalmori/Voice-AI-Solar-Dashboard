@@ -34,7 +34,11 @@ class CommandRouter {
   /// Try to match user input to a known command.
   Future<CommandResult> processMessage(String input) async {
     // Normalize: strip apostrophes so voice "can't" matches keyword "cant"
-    final text = input.toLowerCase().trim().replaceAll("'", '').replaceAll("\u2019", '');
+    // Also map common mispronunciation "early" to "yearly"
+    final text = input.toLowerCase().trim()
+        .replaceAll("'", '')
+        .replaceAll("\u2019", '')
+        .replaceAll(RegExp(r'\bearly\b'), 'yearly');
     final tools = <ToolCallInfo>[];
 
     try {
