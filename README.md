@@ -2,6 +2,7 @@
 
 A Flutter mobile application that wraps the **aALoK Solar Monitoring Dashboard** in a WebView and lets users control it with **voice commands** and **text input** via an on-device **Smart Assistant**. No API calls — everything runs locally using pattern matching and JavaScript injection.
 
+APK download link : https://drive.google.com/drive/folders/1S3obgO8cGSQigfWSqOsohLuaOeaFNYEk
 ---
 
 ## ✨ Features
